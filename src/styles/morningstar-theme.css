@@ -1,0 +1,154 @@
+@font-face {
+  font-family: 'HelveticaNeueWeb';
+  font-style: normal;
+  font-weight: 200;
+  font-display: swap;
+  src:
+    local('HelveticaNeue UltraLight'),
+    local('Helvetica Neue UltraLight'),
+    url('/fonts/HelveticaNeueUltraLight.otf') format('opentype');
+}
+
+@font-face {
+  font-family: 'HelveticaNeueWeb';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src:
+    local('HelveticaNeue Light'),
+    local('Helvetica Neue Light'),
+    url('/fonts/HelveticaNeueLight.otf') format('opentype');
+}
+
+@font-face {
+  font-family: 'HelveticaNeueWeb';
+  font-style: italic;
+  font-weight: 300;
+  font-display: swap;
+  src:
+    local('HelveticaNeue Light Italic'),
+    local('Helvetica Neue Light Italic'),
+    url('/fonts/HelveticaNeueLightItalic.otf') format('opentype');
+}
+
+@font-face {
+  font-family: 'HelveticaNeueWeb';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    local('HelveticaNeue Roman'),
+    local('Helvetica Neue Roman'),
+    url('/fonts/HelveticaNeueRoman.otf') format('opentype');
+}
+
+@font-face {
+  font-family: 'HelveticaNeueWeb';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src:
+    local('HelveticaNeue Medium'),
+    local('Helvetica Neue Medium'),
+    url('/fonts/HelveticaNeueMedium.otf') format('opentype');
+}
+
+:root {
+  --ms-color-text-primary: rgb(26, 25, 24);
+  --ms-color-text-secondary: rgb(51, 51, 51);
+  --ms-color-text-tertiary: rgb(78, 76, 74);
+
+  --ms-color-surface-page-start: rgb(255, 255, 255);
+  --ms-color-surface-page-mid: rgb(224, 234, 248);
+  --ms-color-surface-page-end: rgb(241, 248, 241);
+  --ms-color-surface-panel: rgb(255, 255, 255);
+  --ms-color-surface-subtle: rgb(244, 244, 244);
+  --ms-color-surface-hero: rgb(224, 234, 248);
+  --ms-color-surface-block: rgb(249, 249, 252);
+  --ms-color-surface-block-strong: rgb(255, 249, 234);
+
+  --ms-color-border-default: rgb(114, 161, 224);
+  --ms-color-border-soft: rgb(199, 221, 246);
+
+  --ms-color-brand: rgb(35, 100, 185);
+  --ms-color-brand-hover: rgb(26, 80, 155);
+  --ms-color-brand-active: rgb(72, 127, 206);
+  --ms-color-link-visited: rgb(52, 31, 80);
+
+  --ms-color-danger: rgb(188, 29, 12);
+  --ms-color-danger-soft: rgb(255, 243, 241);
+  --ms-color-success: rgb(6, 119, 59);
+  --ms-color-success-soft: rgb(241, 248, 241);
+  --ms-color-warning: rgb(245, 199, 44);
+  --ms-color-warning-soft: rgb(255, 249, 234);
+
+  --ms-color-chip-bg: rgb(255, 255, 255);
+  --ms-color-chip-border: rgb(114, 161, 224);
+
+  --ms-gradient-accent: linear-gradient(
+    120deg,
+    rgb(230, 61, 118) 0%,
+    rgb(247, 151, 83) 45%,
+    rgb(251, 194, 75) 100%
+  );
+
+  --ms-font-stack:
+    'HelveticaNeueWeb', 'HelveticaNeue', HelveticaNeue, 'Helvetica Neue', Helvetica, Arial,
+    sans-serif;
+}
+
+body {
+  background: var(--ms-color-surface-page-start);
+  color: var(--ms-color-text-primary);
+  font-family: var(--ms-font-stack);
+}
+
+html,
+body,
+button,
+input,
+select,
+textarea {
+  font-family: var(--ms-font-stack);
+  font-weight: 300;
+}
+
+a {
+  border-bottom: 1px solid transparent;
+  color: var(--ms-color-brand);
+  outline: 0;
+  text-decoration: none;
+  transition:
+    color 0.2s linear,
+    border-color 0.2s linear;
+}
+
+a:hover,
+a:focus-visible {
+  border-bottom-color: currentcolor;
+  color: var(--ms-color-brand-hover);
+}
+
+a:visited {
+  color: var(--ms-color-link-visited);
+}
+
+a:visited:hover,
+a:visited:focus-visible {
+  color: var(--ms-color-link-visited);
+}
+
+button {
+  font-family: var(--ms-font-stack);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--ms-color-brand);
+  outline-offset: 2px;
+}
+
+button:disabled,
+[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
