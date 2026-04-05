@@ -10,6 +10,9 @@ const props = defineProps({
 
 const emit = defineEmits(['submit'])
 
+const STORAGE_LAST_MODE_KEY = 'stepsafe:last-input-mode'
+const STORAGE_RECENT_CHECKS_KEY = 'stepsafe:recent-checks'
+
 const form = reactive({
   text: '',
   link: '',
@@ -17,8 +20,19 @@ const form = reactive({
   recruiterName: '',
 })
 
-const inputType = ref('text')
+const inputType = ref(readStoredInputMode())
 const errorMessage = ref('')
+const recentChecks = ref(readStoredRecentChecks())
+const isQuickControlsOpen = ref(false)
+
+const sampleInputs = {
+  low:
+    'Hello, we saw your profile and invite you to apply. Interview details are on our official site. No upfront payment is required.',
+  medium:
+    'Great part-time task role. Complete simple review tasks and receive commission quickly. You can unlock more rewards after the first recharge.',
+  high:
+    'Urgent: complete these simple tasks now and earn guaranteed commission. Transfer a verification fee immediately to release your payout.',
+}
 
 const inputLabel = computed(() => {
   if (inputType.value === 'text') return 'Recruiter message'
@@ -26,10 +40,40 @@ const inputLabel = computed(() => {
   return 'PDF file'
 })
 
-function useDemoText() {
+function readStoredInputMode() {
+  if (typeof window === 'undefined') return 'text'
+
+  const saved = window.localStorage.getItem(STORAGE_LAST_MODE_KEY)
+  if (saved === 'text' || saved === 'pdf' || saved === 'link') {
+    return saved
+  }
+
+  return 'text'
+}
+
+function readStoredRecentChecks() {
+  if (typeof window === 'undefined') return []
+
+  const raw = window.localStorage.getItem(STORAGE_RECENT_CHECKS_KEY)
+  if (!raw) return []
+
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.slice(0, 3)
+  } catch {
+    return []
+  }
+}
+
+function persistRecentChecks() {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(STORAGE_RECENT_CHECKS_KEY, JSON.stringify(recentChecks.value.slice(0, 3)))
+}
+
+function applySampleInput(level) {
   inputType.value = 'text'
-  form.text =
-    'Hi friend, simple remote task. Earn 500 dollars quickly. You only need to pay a small verification fee first.'
+  form.text = sampleInputs[level] ?? sampleInputs.high
   errorMessage.value = ''
 }
 
@@ -70,13 +114,64 @@ function submitForAnalysis() {
   }
 
   errorMessage.value = ''
-  emit('submit', {
+  const payload = {
     inputType: inputType.value,
     text: form.text,
     link: form.link,
     pdfFile: form.pdfFile,
     recruiterName: form.recruiterName,
-  })
+  }
+
+  emit('submit', payload)
+
+  const recentEntry = {
+    id: Date.now(),
+    inputType: payload.inputType,
+    recruiterName: payload.recruiterName,
+    text: payload.text?.slice(0, 480) ?? '',
+    link: payload.link?.slice(0, 280) ?? '',
+    createdAt: new Date().toISOString(),
+  }
+
+  recentChecks.value = [recentEntry, ...recentChecks.value].slice(0, 3)
+  persistRecentChecks()
+}
+
+function reuseRecentCheck(item) {
+  if (!item) return
+
+  inputType.value = item.inputType === 'pdf' ? 'text' : item.inputType
+  form.recruiterName = item.recruiterName ?? ''
+  form.text = item.text ?? ''
+  form.link = item.link ?? ''
+  form.pdfFile = null
+  errorMessage.value =
+    item.inputType === 'pdf'
+      ? 'PDF records require re-uploading the file before analysis.'
+      : ''
+}
+
+function getRecentLabel(item) {
+  if (item.inputType === 'link') {
+    return item.link ? `Link: ${item.link}` : 'Link record'
+  }
+
+  if (item.inputType === 'pdf') {
+    return 'PDF record (re-upload required)'
+  }
+
+  if (item.text) {
+    return `Text: ${item.text.slice(0, 64)}${item.text.length > 64 ? '...' : ''}`
+  }
+
+  return 'Text record'
+}
+
+function handleComposeKeydown(event) {
+  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+    event.preventDefault()
+    submitForAnalysis()
+  }
 }
 
 watch(
@@ -87,6 +182,14 @@ watch(
     }
     inputType.value = mode
     errorMessage.value = ''
+  },
+)
+
+watch(
+  inputType,
+  (mode) => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(STORAGE_LAST_MODE_KEY, mode)
   },
   { immediate: true },
 )
@@ -110,6 +213,8 @@ watch(
 
     <div class="editor-grid">
       <aside class="mode-rail" role="tablist" aria-label="Input type tabs">
+        <p class="mode-hint">Choose one input mode first (3 options), then add evidence below.</p>
+
         <button
           type="button"
           class="mode-button"
@@ -135,13 +240,6 @@ watch(
           Paste website link
         </button>
 
-        <div class="rail-assist-actions">
-          <button type="button" class="assist-btn" @click="useDemoText">Use demo text</button>
-          <button type="button" class="assist-btn assist-btn--muted" @click="clearCurrentInput">
-            Clear
-          </button>
-        </div>
-
         <div class="mode-field">
           <label class="mode-input-row" for="recruiterName">Recruiter name</label>
           <input
@@ -153,7 +251,7 @@ watch(
         </div>
       </aside>
 
-      <div class="compose-pane">
+      <div class="compose-pane" @keydown="handleComposeKeydown">
         <div class="compose-head">
           <p>Evidence Input</p>
           <p class="compose-head__mode">{{ inputLabel }}</p>
@@ -189,8 +287,57 @@ watch(
           </p>
         </div>
 
+        <section class="quick-controls" aria-label="Sample inputs and recent checks">
+          <button
+            type="button"
+            class="quick-controls__toggle"
+            aria-controls="quick-controls-panel"
+            :aria-expanded="isQuickControlsOpen"
+            @click="isQuickControlsOpen = !isQuickControlsOpen"
+          >
+            <span>Quick controls</span>
+            <span class="quick-controls__toggle-text">{{ isQuickControlsOpen ? 'Hide' : 'Show' }}</span>
+          </button>
+
+          <div v-if="isQuickControlsOpen" id="quick-controls-panel" class="quick-controls__panel">
+            <div class="rail-assist-actions" aria-label="Sample inputs">
+              <button type="button" class="assist-btn" @click="applySampleInput('low')">
+                Low sample
+              </button>
+              <button type="button" class="assist-btn" @click="applySampleInput('medium')">
+                Medium sample
+              </button>
+              <button type="button" class="assist-btn" @click="applySampleInput('high')">
+                High sample
+              </button>
+              <button
+                type="button"
+                class="assist-btn assist-btn--muted"
+                @click="clearCurrentInput"
+              >
+                Clear
+              </button>
+            </div>
+
+            <div v-if="recentChecks.length" class="recent-checks" aria-label="Recent checks">
+              <p class="recent-checks__title">Recent checks</p>
+              <button
+                v-for="item in recentChecks"
+                :key="item.id"
+                type="button"
+                class="recent-check-btn"
+                @click="reuseRecentCheck(item)"
+              >
+                {{ getRecentLabel(item) }}
+              </button>
+            </div>
+          </div>
+        </section>
+
         <p class="privacy-note">
-          Privacy note: We only analyze content you submit to detect scam patterns.
+          Privacy note: Your submitted text, link, or extracted PDF content is used only for this
+          risk assessment workflow. Please avoid uploading highly sensitive personal data such as
+          bank credentials, identity numbers, or private account secrets.
         </p>
 
         <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
@@ -210,31 +357,31 @@ watch(
 
 .submission-panel {
   background: var(--ms-color-surface-page-start);
-  padding: 24px;
+  padding: 18px;
 }
 
 .submission-head {
   align-items: center;
   background: var(--ms-color-surface-subtle);
   display: grid;
-  gap: 18px;
-  grid-template-columns: 96px minmax(0, 1fr);
-  margin-bottom: 18px;
-  padding: 24px;
+  gap: 12px;
+  grid-template-columns: 76px minmax(0, 1fr);
+  margin-bottom: 12px;
+  padding: 16px;
 }
 
 .head-inset {
   align-items: center;
   background: var(--ms-color-surface-page-mid);
   display: flex;
-  height: 96px;
+  height: 76px;
   justify-content: center;
-  width: 96px;
+  width: 76px;
 }
 
 .head-inset img {
-  height: 46px;
-  width: 46px;
+  height: 36px;
+  width: 36px;
 }
 
 .head-kicker {
@@ -250,7 +397,7 @@ h2 {
   font-size: clamp(2rem, 4vw, 3.1rem);
   font-weight: 300;
   line-height: 0.95;
-  margin: 0 0 20px;
+  margin: 0 0 12px;
 }
 
 .head-summary {
@@ -261,8 +408,9 @@ h2 {
 }
 
 .editor-grid {
+  align-items: start;
   display: grid;
-  gap: 18px;
+  gap: 12px;
   grid-template-columns: minmax(240px, 0.68fr) minmax(0, 1.32fr);
 }
 
@@ -270,8 +418,15 @@ h2 {
   background: var(--ms-color-surface-page-mid);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 24px;
+  gap: 8px;
+  padding: 18px;
+}
+
+.mode-hint {
+  color: var(--ms-color-text-secondary);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  margin: 0 0 2px;
 }
 
 .mode-button {
@@ -302,7 +457,7 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 0;
 }
 
 .assist-btn {
@@ -327,8 +482,82 @@ h2 {
 
 .mode-field {
   background: var(--ms-color-surface-page-start);
-  margin-top: 12px;
-  padding: 20px;
+  margin-top: 8px;
+  padding: 16px;
+}
+
+.recent-checks {
+  background: var(--ms-color-surface-page-start);
+  margin-top: 8px;
+  padding: 12px;
+}
+
+.quick-controls {
+  background: var(--ms-color-surface-page-mid);
+  border-top: 1px solid rgba(26, 25, 24, 0.12);
+  margin-top: 2px;
+  padding: 12px;
+}
+
+.quick-controls__toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--ms-color-text-primary);
+  cursor: pointer;
+  display: flex;
+  font-size: 0.78rem;
+  font-weight: 600;
+  justify-content: space-between;
+  letter-spacing: 0.07em;
+  padding: 0;
+  text-transform: uppercase;
+  width: 100%;
+}
+
+.quick-controls__toggle-text {
+  color: var(--ms-color-brand-hover);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.quick-controls__panel {
+  margin-top: 10px;
+}
+
+.recent-checks__title {
+  color: var(--ms-color-text-secondary);
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.recent-check-btn {
+  background: var(--ms-color-surface-subtle);
+  border: 0;
+  color: var(--ms-color-text-primary);
+  cursor: pointer;
+  display: block;
+  font-size: 0.8rem;
+  margin-bottom: 8px;
+  min-height: 36px;
+  overflow: hidden;
+  padding: 8px 10px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.recent-check-btn:last-child {
+  margin-bottom: 0;
+}
+
+.recent-check-btn:hover,
+.recent-check-btn:focus-visible {
+  background: var(--ms-color-border-soft);
 }
 
 .mode-input-row {
@@ -346,11 +575,15 @@ h2 {
   width: 100%;
 }
 
+#recruiterName {
+  scroll-margin-top: 84px;
+}
+
 .compose-pane {
   background: var(--ms-color-surface-page-start);
   display: grid;
-  gap: 14px;
-  padding: 24px;
+  gap: 10px;
+  padding: 18px;
 }
 
 .compose-head {
@@ -375,9 +608,9 @@ h2 {
   background: var(--ms-color-surface-subtle);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  min-height: 188px;
-  padding: 24px;
+  gap: 8px;
+  min-height: 150px;
+  padding: 18px;
 }
 
 label {
@@ -421,9 +654,11 @@ textarea {
 .privacy-note {
   background: var(--ms-color-surface-page-mid);
   color: var(--ms-color-text-secondary);
+  font-size: 0.74rem;
+  letter-spacing: 0.01em;
   line-height: 1.6;
   margin: 0;
-  padding: 20px;
+  padding: 14px;
 }
 
 .error-text {
@@ -442,9 +677,9 @@ textarea {
   font-size: 1.02rem;
   font-weight: 600;
   justify-content: center;
-  min-height: 52px;
+  min-height: 48px;
   min-width: 260px;
-  padding: 16px 32px;
+  padding: 14px 28px;
   text-transform: uppercase;
   transition: background-color 0.2s ease;
 }

@@ -79,18 +79,50 @@ async function parsePdfByPyMuPDF(pdfFile) {
     body: formData,
   })
 
+  const payload = await response.json().catch(() => ({}))
+
   if (!response.ok) {
-    throw new Error(`PyMuPDF parsing failed with status ${response.status}`)
+    if (response.status === 502) {
+      throw new Error('PDF parsing service is unavailable (502). Please make sure the backend API is running on 127.0.0.1:8000.')
+    }
+
+    const detail = typeof payload?.detail === 'string' ? payload.detail : ''
+    throw new Error(detail || `PyMuPDF parsing failed with status ${response.status}`)
   }
 
-  const payload = await response.json()
   const text = typeof payload?.text === 'string' ? payload.text.trim() : ''
-
-  if (!text) {
-    throw new Error('PyMuPDF returned empty text content')
+  if (text) {
+    return text
   }
 
-  return text
+  const warning = Array.isArray(payload?.warnings) && payload.warnings.length ? payload.warnings[0] : ''
+  const suffix = warning ? ` (${warning})` : ''
+  return `[No readable text extracted from "${pdfFile.name}". The file may be image-based or OCR is not available${suffix}.]`
+}
+
+function buildPdfExtractionErrorMessage(pdfFile, error) {
+  const reason = error instanceof Error ? error.message : 'Unknown parser error'
+  return `PDF extraction could not be completed for "${pdfFile.name}": ${reason}.`
+}
+
+export function normalizeExtractedContent(rawText) {
+  if (typeof rawText !== 'string') return ''
+  return rawText.replace(/\u0000/g, '').trim()
+}
+
+export function isExtractionDiagnosticMessage(text) {
+  return /^PDF extraction could not be completed|^\[No readable text extracted/i.test(text)
+}
+
+export function toAnalysisInput(content) {
+  const normalized = normalizeExtractedContent(content)
+  if (!normalized) return ''
+
+  if (isExtractionDiagnosticMessage(normalized)) {
+    return ''
+  }
+
+  return normalized
 }
 
 export async function extractTextFromSubmission({ inputType, text, link, pdfFile }) {
@@ -105,9 +137,8 @@ export async function extractTextFromSubmission({ inputType, text, link, pdfFile
   if (inputType === 'pdf' && pdfFile) {
     try {
       return await parsePdfByPyMuPDF(pdfFile)
-    } catch {
-      const raw = await pdfFile.text()
-      return `${pdfFile.name} ${raw}`.trim()
+    } catch (error) {
+      return buildPdfExtractionErrorMessage(pdfFile, error)
     }
   }
 
@@ -115,7 +146,8 @@ export async function extractTextFromSubmission({ inputType, text, link, pdfFile
 }
 
 export function analyzeTextContent(content) {
-  const matches = RED_FLAG_RULES.filter((rule) => rule.pattern.test(content))
+  const analysisInput = toAnalysisInput(content)
+  const matches = RED_FLAG_RULES.filter((rule) => rule.pattern.test(analysisInput))
   const riskScore = calculateRiskScore(matches)
   const riskTier = getRiskTier(riskScore)
   const typeResult = classifyScamType(matches)

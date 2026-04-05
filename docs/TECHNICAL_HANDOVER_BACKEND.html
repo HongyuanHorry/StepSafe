@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>TECHNICAL_HANDOVER_BACKEND</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      white-space: pre-wrap;
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+  </style>
+  <script defer=""
+  src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js"
+  type="text/javascript"></script>
+</head>
+<body>
+<h1 id="stepsafe-technical-handover-backend-iteration">StepSafe
+Technical Handover (Backend Iteration)</h1>
+<p>Last updated: 2026-04-05</p>
+<p>Current strict completion snapshot (after latest UI updates):</p>
+<ul>
+<li>US completed: 0 / 4</li>
+<li>AC completed: 7 / 16</li>
+</ul>
+<h2 id="purpose-and-scope">1. Purpose and Scope</h2>
+<p>This document is for backend engineers who will continue StepSafe
+iteration work.</p>
+<p>Current delivered capability:</p>
+<ul>
+<li>Frontend can accept text, link, and PDF input.</li>
+<li>PDF text extraction is integrated with a FastAPI + PyMuPDF
+service.</li>
+<li>Scam scoring and classification currently run in frontend JavaScript
+logic.</li>
+</ul>
+<p>Important scope boundary:</p>
+<ul>
+<li>This is not yet a true backend-driven detection engine.</li>
+<li>The backend currently only performs PDF parsing (plus optional OCR
+fallback).</li>
+</ul>
+<hr />
+<h2 id="current-architecture-as-implemented">2. Current Architecture (As
+Implemented)</h2>
+<h2 id="frontend">2.1 Frontend</h2>
+<ul>
+<li>Framework: Vue 3 + Vite.</li>
+<li>Core page orchestration: src/App.vue</li>
+<li>Submission UI: src/components/SubmissionPanel.vue</li>
+<li>Result UI: src/components/ResultPanel.vue</li>
+<li>Detection logic (currently frontend-side):
+src/services/scamAnalysisEngine.js</li>
+<li>Rule/taxonomy constants: src/constants/scamRules.js</li>
+</ul>
+<h2 id="backend">2.2 Backend</h2>
+<ul>
+<li>Framework: FastAPI + Uvicorn</li>
+<li>File: backend/main.py</li>
+<li>Endpoint:
+<ul>
+<li>GET /api/pymupdf/health</li>
+<li>POST /api/pymupdf/parse</li>
+</ul></li>
+<li>Purpose: Parse PDF text via PyMuPDF, with OCR fallback per page when
+no embedded text is found.</li>
+</ul>
+<h2 id="runtime-wiring">2.3 Runtime wiring</h2>
+<ul>
+<li>Vite dev proxy forwards /api to http://127.0.0.1:8000
+(vite.config.js).</li>
+<li>Frontend calls /api/pymupdf/parse for PDF only.</li>
+<li>Text/link analysis does not call backend currently.</li>
+</ul>
+<hr />
+<h2 id="core-data-flow">3. Core Data Flow</h2>
+<h2 id="text-input-path">3.1 Text input path</h2>
+<ol type="1">
+<li>User submits recruiter message in SubmissionPanel.</li>
+<li>App calls extractTextFromSubmission with inputType=text.</li>
+<li>Returned text is analyzed by analyzeTextContent in frontend.</li>
+<li>ResultPanel renders score, type, indicators, and explanation.</li>
+</ol>
+<p>Backend participation: none.</p>
+<h2 id="link-input-path">3.2 Link input path</h2>
+<ol type="1">
+<li>User submits link in SubmissionPanel.</li>
+<li>App calls extractTextFromSubmission with inputType=link.</li>
+<li>Raw link string is analyzed directly by analyzeTextContent in
+frontend.</li>
+<li>ResultPanel renders output.</li>
+</ol>
+<p>Backend participation: none.</p>
+<h2 id="pdf-input-path">3.3 PDF input path</h2>
+<ol type="1">
+<li>User uploads PDF in SubmissionPanel.</li>
+<li>App calls extractTextFromSubmission with inputType=pdf.</li>
+<li>Frontend sends multipart request to POST /api/pymupdf/parse.</li>
+<li>Backend extracts text page-by-page (and OCR fallback when
+enabled).</li>
+<li>Frontend receives text and runs analyzeTextContent in frontend.</li>
+<li>ResultPanel renders output and a collapsible extracted-text
+preview.</li>
+</ol>
+<hr />
+<h2 id="api-contract-current">4. API Contract (Current)</h2>
+<h2 id="get-apipymupdfhealth">4.1 GET /api/pymupdf/health</h2>
+<p>Response: { “status”: “ok” }</p>
+<h2 id="post-apipymupdfparse">4.2 POST /api/pymupdf/parse</h2>
+<p>Request:</p>
+<ul>
+<li>multipart/form-data</li>
+<li>file: UploadFile (.pdf)</li>
+<li>query params:
+<ul>
+<li>enable_ocr: bool (default true)</li>
+<li>ocr_language: str (default env PYMUPDF_OCR_LANGUAGE or eng)</li>
+<li>ocr_dpi: int (default env PYMUPDF_OCR_DPI or 150)</li>
+</ul></li>
+</ul>
+<p>Success response fields:</p>
+<ul>
+<li>text: string</li>
+<li>pageCount: number</li>
+<li>extractedPages: number</li>
+<li>hasText: boolean</li>
+<li>ocrEnabled: boolean</li>
+<li>ocrLanguage: string</li>
+<li>ocrDpi: number</li>
+<li>ocrAttemptedPages: number</li>
+<li>ocrSucceededPages: number</li>
+<li>warnings: string[]</li>
+</ul>
+<p>Error behavior:</p>
+<ul>
+<li>400 for non-PDF/empty file/parse exception.</li>
+<li>Frontend maps 502 to parser-unavailable message when backend is
+down.</li>
+</ul>
+<hr />
+<h2 id="detection-logic-current-frontend-implementation">5. Detection
+Logic (Current Frontend Implementation)</h2>
+<p>Location: src/services/scamAnalysisEngine.js and
+src/constants/scamRules.js</p>
+<h2 id="rule-model">5.1 Rule model</h2>
+<p>Each rule contains:</p>
+<ul>
+<li>id</li>
+<li>label</li>
+<li>regex pattern</li>
+<li>severity</li>
+<li>weight</li>
+<li>typeVotes (for scam type classification)</li>
+</ul>
+<p>Current taxonomy:</p>
+<ul>
+<li>task-based scam</li>
+<li>job scam</li>
+<li>payment scam</li>
+<li>unknown or unclear (fallback)</li>
+</ul>
+<h2 id="risk-scoring">5.2 Risk scoring</h2>
+<p>Simple version (recommended for handover reading):</p>
+<ol type="1">
+<li>Add up all matched warning-sign weights.</li>
+<li>If high-severity matches are 3 or more, add 12.</li>
+<li>If total matched warning signs are 4 or more, add 6.</li>
+<li>If the final number is above 100, set it to 100.</li>
+<li>If the final number is below 0, set it to 0.</li>
+</ol>
+<p>Compact formula (same logic as code):</p>
+<p><span class="math display">\[
+\mathrm{RiskScore} = \max\left(0, \min\left(100, \sum_{i=1}^{N} w_i + [H
+\ge 3] \cdot 12 + [N \ge 4] \cdot 6\right)\right)
+\]</span></p>
+<p>Where:</p>
+<ul>
+<li>N = total matched warning signs</li>
+<li>H = matched warning signs with high severity</li>
+<li>w_i = weight of the i-th matched warning sign</li>
+<li>[condition] = 1 if true, otherwise 0</li>
+</ul>
+<p>Worked examples:</p>
+<ul>
+<li>Example A: matched weights 34 + 22 = 56, H=1, N=2 -&gt; score =
+56.</li>
+<li>Example B: matched weights 34 + 34 + 30 = 98, H=3, N=3 -&gt; +12
+-&gt; 110 -&gt; capped to 100.</li>
+<li>Example C: matched weights 22 + 20 + 34 + 30 = 106, H=2, N=4 -&gt;
++6 -&gt; 112 -&gt; capped to 100.</li>
+</ul>
+<h2 id="suspicious-label-logic">5.3 Suspicious label logic</h2>
+<ul>
+<li>suspicious = (riskScore &gt;= 40) OR (matched indicators &gt;=
+2)</li>
+</ul>
+<p>Current UI note:</p>
+<ul>
+<li>ResultPanel now shows an explicit binary status label: “Suspicious”
+or “Not suspicious”.</li>
+</ul>
+<h2 id="scam-type-classification">5.4 Scam type classification</h2>
+<ul>
+<li>Aggregate weighted votes into taxonomy buckets.</li>
+<li>confidence = topScore / totalScore.</li>
+<li>If confidence &lt; threshold (0.5) or no score, return “unknown or
+unclear”.</li>
+</ul>
+<hr />
+<h2 id="ops-runbook-local">6. Ops Runbook (Local)</h2>
+<h2 id="frontend-1">6.1 Frontend</h2>
+<ol type="1">
+<li>npm install</li>
+<li>npm run dev</li>
+</ol>
+<h2 id="backend-1">6.2 Backend</h2>
+<ol type="1">
+<li>Create and activate venv</li>
+<li>pip install -r backend/requirements.txt</li>
+<li>uvicorn backend.main:app –host 127.0.0.1 –port 8000 –reload</li>
+</ol>
+<h2 id="ocr-prerequisites">6.3 OCR prerequisites</h2>
+<ul>
+<li>Install Tesseract runtime in deployment environment.</li>
+<li>Ensure tessdata available; set TESSDATA_PREFIX when required.</li>
+</ul>
+<hr />
+<h2 id="strict-epic-completion-matrix-usac">7. Strict Epic Completion
+Matrix (US/AC)</h2>
+<p>Definition used here:</p>
+<ul>
+<li>US is counted as completed only when all AC under that US are fully
+satisfied in implementation.</li>
+<li>Any partial/missing/ambiguous AC means US is not completed.</li>
+</ul>
+<h2 id="epic-1.0">7.1 Epic 1.0</h2>
+<h3 id="us-1.1-submit-content-for-scam-analysis">US 1.1 Submit Content
+for Scam Analysis</h3>
+<ul>
+<li>US 1.1 overall status: Not completed (strict)</li>
+</ul>
+<p>AC status:</p>
+<ul>
+<li>AC 1.1.1: Not completed (strict)
+<ul>
+<li>Reason: all three input types are accepted in UI, and PDF uses
+PyMuPDF parse; however text/link are not routed to a backend detection
+engine, only frontend analysis.</li>
+</ul></li>
+<li>AC 1.1.2: Completed
+<ul>
+<li>Reason: result page now shows an explicit binary status label
+(“Suspicious” / “Not suspicious”).</li>
+</ul></li>
+<li>AC 1.1.3: Completed
+<ul>
+<li>Reason: indicators such as payment, urgency, sensitive info are
+detected and rendered.</li>
+</ul></li>
+</ul>
+<h3 id="us-1.2-scam-risk-score">US 1.2 Scam Risk Score</h3>
+<ul>
+<li>US 1.2 overall status: Not completed (strict)</li>
+</ul>
+<p>AC status:</p>
+<ul>
+<li>AC 1.2.1: Not completed (strict)
+<ul>
+<li>Reason: risk score is computed by frontend JS, not backend detection
+engine.</li>
+</ul></li>
+<li>AC 1.2.2: Completed
+<ul>
+<li>Reason: factors contributing to score are listed and surfaced.</li>
+</ul></li>
+<li>AC 1.2.3: Completed
+<ul>
+<li>Reason: additive weighting with multi-flag bonus is
+implemented.</li>
+</ul></li>
+<li>AC 1.2.4: Completed
+<ul>
+<li>Reason: result text was simplified to plain-language wording and
+technical phrasing was removed from the result view.</li>
+</ul></li>
+</ul>
+<h3 id="us-1.3-identify-scam-type">US 1.3 Identify Scam Type</h3>
+<ul>
+<li>US 1.3 overall status: Not completed (strict)</li>
+</ul>
+<p>AC status:</p>
+<ul>
+<li>AC 1.3.1: Not completed (strict)
+<ul>
+<li>Reason: fixed taxonomy exists, but it is hard-coded in frontend
+constants rather than maintained in a database.</li>
+</ul></li>
+<li>AC 1.3.2: Completed
+<ul>
+<li>Reason: scam type is displayed in result summary near score
+panel.</li>
+</ul></li>
+<li>AC 1.3.3: Completed
+<ul>
+<li>Reason: confidence threshold and unknown/unclear fallback are
+implemented.</li>
+</ul></li>
+</ul>
+<h2 id="epic-3.0-recruiter-business-legitimacy-verification">7.2 Epic
+3.0 Recruiter &amp; Business Legitimacy Verification</h2>
+<h3 id="us-3.1-verify-recruiter-or-business">US 3.1 Verify Recruiter or
+Business</h3>
+<ul>
+<li>US 3.1 overall status: Not completed (strict)</li>
+</ul>
+<p>AC status:</p>
+<ul>
+<li>AC 3.1.1: Not completed
+<ul>
+<li>Reason: no implemented legitimacy engine and no dedicated legitimacy
+reasoning output.</li>
+</ul></li>
+<li>AC 3.1.2: Not completed
+<ul>
+<li>Reason: no ABN/business registry lookup implementation.</li>
+</ul></li>
+<li>AC 3.1.3: Not completed
+<ul>
+<li>Reason: no explicit limited-result messaging logic tied to
+incomplete recruiter/company data.</li>
+</ul></li>
+<li>AC 3.2.1: Not completed
+<ul>
+<li>Reason: no domain verification pipeline (domain
+age/reputation/consistency) implemented.</li>
+</ul></li>
+<li>AC 3.2.2: Not completed
+<ul>
+<li>Reason: no domain risk warning path implemented from actual domain
+intelligence source.</li>
+</ul></li>
+<li>AC 3.2.3: Not completed
+<ul>
+<li>Reason: no positive trust indicator path based on verified
+domain-business matching.</li>
+</ul></li>
+</ul>
+<hr />
+<h2 id="what-paths-are-still-not-fully-run-through">8. What Paths Are
+Still Not Fully Run Through</h2>
+<ol type="1">
+<li>End-to-end backend-driven detection path (text/link/pdf -&gt;
+backend scoring/classification -&gt; frontend render) is not
+implemented.</li>
+<li>Production deployment path (frontend + backend + OCR runtime) has
+not been fully verified as a single reproducible deployment
+runbook.</li>
+<li>OCR success path on true scanned PDFs has not been consistently
+validated in this repository with pinned fixture cases.</li>
+<li>ABN lookup path and domain legitimacy path are not implemented.</li>
+<li>No automated unit/integration/e2e test suite exists to prove AC
+compliance continuously.</li>
+<li>No persistence/database layer exists for
+taxonomy/rules/versioning/audit.</li>
+</ol>
+<hr />
+<h2 id="recommended-backend-iteration-plan">9. Recommended Backend
+Iteration Plan</h2>
+<p>Priority P0 (to make Epic 1 strict-complete path possible):</p>
+<ol type="1">
+<li>Add backend analysis endpoint (for all input types):
+<ul>
+<li>POST /api/analyze</li>
+<li>Input: normalized text content + metadata</li>
+<li>Output: suspicious(boolean), binaryLabel, riskScore, scamType,
+indicators, factors, explanation</li>
+</ul></li>
+<li>Move scoring/classification logic from frontend to backend
+service.</li>
+<li>Add explicit binary label field and make frontend display it
+prominently.</li>
+<li>Add API-level contract tests for score/type/threshold behavior.</li>
+</ol>
+<p>Priority P1 (Epic 3 baseline):</p>
+<ol type="1">
+<li>Add ABN verification service abstraction (provider-swappable).</li>
+<li>Add domain checks (age, registrar confidence, mismatch checks).</li>
+<li>Add legitimacy result model with limited-evidence state.</li>
+</ol>
+<p>Priority P2 (engineering quality):</p>
+<ol type="1">
+<li>Add test pyramid:
+<ul>
+<li>backend unit tests for scoring/classification</li>
+<li>API integration tests for /api/pymupdf/parse and /api/analyze</li>
+<li>frontend e2e happy paths for text/link/pdf</li>
+</ul></li>
+<li>Add observability:
+<ul>
+<li>request IDs</li>
+<li>parse/analyze timing</li>
+<li>OCR warnings metrics</li>
+</ul></li>
+<li>Add deployment artifacts:
+<ul>
+<li>Dockerfile(s)</li>
+<li>env templates</li>
+<li>health/readiness checks</li>
+</ul></li>
+</ol>
+<hr />
+<h2 id="known-risks-and-notes">10. Known Risks and Notes</h2>
+<ol type="1">
+<li>Current trust boundary risk: analysis in frontend can be bypassed or
+altered by client-side changes.</li>
+<li>OCR dependency risk: Tesseract missing in runtime will reduce
+extraction quality for scanned PDFs.</li>
+<li>UX consistency issue: SubmissionPanel text says parse may fallback
+to local reading, but current engine intentionally removed raw local PDF
+text fallback to avoid binary-gibberish output.</li>
+<li>Dataset under datasets/ exists, but no backend training/inference
+pipeline currently consumes it.</li>
+</ol>
+<hr />
+<h2 id="handover-checklist-for-next-engineer">11. Handover Checklist for
+Next Engineer</h2>
+<ol type="1">
+<li>Confirm local startup for both frontend and backend.</li>
+<li>Confirm /api/pymupdf/health and /api/pymupdf/parse with at least one
+text PDF and one scanned PDF.</li>
+<li>Implement /api/analyze and migrate rule engine server-side.</li>
+<li>Wire frontend submission to /api/analyze for text/link/pdf.</li>
+<li>Add strict AC validation checklist in test cases.</li>
+<li>Implement Epic 3 legitimacy verification endpoints and UI
+model.</li>
+</ol>
+<hr />
+<h2 id="repository-upload-boundary-and-venv-notes">12. Repository Upload
+Boundary and venv Notes</h2>
+<ol type="1">
+<li>Git repository root is the StepSafe folder.</li>
+<li>Parent folder artifacts (for example Iteration 1/.venv/) are outside
+this repository and are not committed when pushing StepSafe.</li>
+<li>StepSafe/.gitignore now includes Python virtual environment and
+cache patterns:</li>
+</ol>
+<ul>
+<li>.venv/</li>
+<li>venv/</li>
+<li><strong>pycache</strong>/</li>
+<li>*.py[cod]</li>
+</ul>
+<ol start="4" type="1">
+<li>Current verification: no venv files are tracked in the StepSafe git
+index.</li>
+</ol>
+</body>
+</html>

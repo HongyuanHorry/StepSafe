@@ -42,3 +42,66 @@ npm run build
 ```sh
 npm run lint
 ```
+
+## PyMuPDF Backend (for PDF text extraction)
+
+The frontend already calls `/api/pymupdf/parse` when uploading a PDF.
+
+This repository now includes a Python backend at [backend/main.py](backend/main.py).
+
+### 1) Create and activate a Python virtual environment
+
+Windows (PowerShell):
+
+```sh
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+```
+
+### 2) Install backend dependencies
+
+```sh
+pip install -r backend/requirements.txt
+```
+
+### 3) Start backend API
+
+```sh
+uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+### 4) Start frontend
+
+```sh
+npm run dev
+```
+
+Vite is configured to proxy `/api/*` to `http://127.0.0.1:8000`, so no frontend code changes are needed.
+
+### Behavior notes
+
+- Text-based PDFs: content is extracted and sent to the scam analysis engine.
+- Scanned/image-only PDFs: extracted text may be empty unless OCR is added (for example Tesseract).
+
+### OCR support (optional but recommended)
+
+The backend now attempts OCR automatically for PDF pages where regular text extraction is empty.
+
+OCR relies on Tesseract being installed on the deployment/runtime machine.
+
+1. Install Tesseract OCR:
+  - Windows: install from official Tesseract builds and ensure the `tessdata` folder exists.
+  - Linux: install with your package manager (for example `apt install tesseract-ocr`).
+
+2. Configure language data path if needed:
+  - Set environment variable `TESSDATA_PREFIX` to your `tessdata` directory.
+
+3. Optional environment tuning:
+  - `PYMUPDF_OCR_LANGUAGE` (default: `eng`)
+  - `PYMUPDF_OCR_DPI` (default: `150`)
+
+When OCR runs, `/api/pymupdf/parse` also returns:
+- `ocrAttemptedPages`
+- `ocrSucceededPages`
+- `warnings`

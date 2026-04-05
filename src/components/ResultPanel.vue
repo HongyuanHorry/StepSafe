@@ -6,9 +6,13 @@ const props = defineProps({
     type: Object,
     required: true,
   },
-  requestSummary: {
+  highlightKeySignals: {
+    type: Boolean,
+    default: false,
+  },
+  extractedTextPreview: {
     type: String,
-    required: true,
+    default: '',
   },
 })
 
@@ -17,30 +21,113 @@ const riskPercent = computed(() => {
   return Math.max(0, Math.min(100, Math.round(raw)))
 })
 
+const normalizedTier = computed(() => {
+  const score = riskPercent.value
+  if (score >= 80) return 'critical'
+  if (score >= 60) return 'high'
+  if (score >= 40) return 'medium'
+  return 'low'
+})
+
 const riskColor = computed(() => {
-  const tier = String(props.result?.riskTier ?? '').toLowerCase()
-  if (tier === 'low') return 'rgb(6, 119, 59)'
-  if (tier === 'medium') return 'rgb(245, 199, 44)'
+  if (normalizedTier.value === 'low') return 'rgb(6, 119, 59)'
+  if (normalizedTier.value === 'medium') return 'rgb(245, 199, 44)'
   return 'rgb(188, 29, 12)'
 })
 
+const riskTierLabel = computed(() => {
+  if (normalizedTier.value === 'critical') return 'Critical'
+  if (normalizedTier.value === 'high') return 'High'
+  if (normalizedTier.value === 'medium') return 'Medium'
+  return 'Low'
+})
+
+const binaryStatusLabel = computed(() => {
+  return props.result?.suspicious ? 'Suspicious' : 'Not suspicious'
+})
+
+const binaryStatusNote = computed(() => {
+  if (props.result?.suspicious) {
+    return 'This message has clear scam warning signs.'
+  }
+  return 'This message has no clear scam warning signs right now.'
+})
+
+const evidenceStrength = computed(() => {
+  const factors = Array.isArray(props.result?.factors) ? props.result.factors : []
+  const indicators = Array.isArray(props.result?.indicators) ? props.result.indicators : []
+
+  const highCount = factors.filter((factor) => String(factor?.severity).toLowerCase() === 'high').length
+  const mediumCount = factors.filter(
+    (factor) => String(factor?.severity).toLowerCase() === 'medium',
+  ).length
+
+  if (!highCount && !mediumCount && indicators.length) {
+    return `${indicators.length} medium signal${indicators.length > 1 ? 's' : ''}`
+  }
+
+  return `${highCount} high / ${mediumCount} medium signals`
+})
+
+const recommendedActionLevel = computed(() => {
+  if (normalizedTier.value === 'critical') return 'Stop payment immediately and verify identity now'
+  if (normalizedTier.value === 'high') return 'Stop payment and verify identity before any next step'
+  if (normalizedTier.value === 'medium') return 'Verify identity before any transfer'
+  return 'Proceed carefully and continue monitoring'
+})
+
+const analysisIntroLine = computed(() => {
+  return `${riskTierLabel.value} risk (${riskPercent.value}/100). ${recommendedActionLevel.value}.`
+})
+
+const confidencePercent = computed(() => {
+  return Number(props.result?.classificationConfidence ?? 0) * 100
+})
+
+const thresholdPercent = computed(() => {
+  return Number(props.result?.classificationConfidenceThreshold ?? 0) * 100
+})
+
+function severityLabel(severity) {
+  const level = String(severity ?? '').toLowerCase()
+  if (level === 'high') return 'Strong warning sign'
+  if (level === 'medium') return 'Moderate warning sign'
+  if (level === 'low') return 'Minor warning sign'
+  return 'Warning sign'
+}
+
 const nextActions = [
-  { label: 'View scam progression', href: '#result-section' },
-  { label: 'Verify recruiter details', href: '#check-section' },
-  { label: 'See trend insights', href: '#home' },
+  { label: 'View scam progression', href: '#learn-section' },
+  { label: 'Verify recruiter details', href: '#recruiterName' },
+  { label: 'See trend insights', href: '#insights-section' },
 ]
 </script>
 
 <template>
-  <section class="result-panel" aria-label="Result panel">
+  <section
+    class="result-panel"
+    :class="{ 'result-panel--focus': highlightKeySignals }"
+    aria-label="Result panel"
+  >
     <div class="result-split">
       <aside class="score-sidebar" aria-label="Risk score block">
         <div class="score-chip" aria-hidden="true"></div>
+        <p class="status-kicker">Status</p>
+        <p class="status-value" role="status">{{ binaryStatusLabel }}</p>
+        <p class="status-note">{{ binaryStatusNote }}</p>
+
         <p class="score-kicker">Risk score</p>
         <p class="score-value">{{ riskPercent }}<span>%</span></p>
-        <p class="score-tier">{{ result.riskTier }} risk</p>
+        <p class="score-tier">{{ riskTierLabel }} risk, {{ riskPercent }}/100</p>
 
-        <div class="score-gauge" role="progressbar" aria-label="Risk score gauge">
+        <div
+          class="score-gauge"
+          role="progressbar"
+          aria-label="Risk score gauge"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          :aria-valuenow="riskPercent"
+        >
           <div
             class="score-gauge__fill"
             :style="{ width: `${riskPercent}%`, backgroundColor: riskColor }"
@@ -48,18 +135,20 @@ const nextActions = [
         </div>
 
         <div class="score-stats">
-          <p><span>Type</span>{{ result.scamType }}</p>
-          <p><span>Confidence</span>{{ (result.classificationConfidence * 100).toFixed(0) }}%</p>
-          <p>
-            <span>Threshold</span>{{ (result.classificationConfidenceThreshold * 100).toFixed(0) }}%
-          </p>
+          <p><span>Scam type</span>{{ result.scamType }}</p>
+          <p><span>Warning signs found</span>{{ evidenceStrength }}</p>
+          <p><span>What to do now</span>{{ recommendedActionLevel }}</p>
         </div>
+
+        <p class="score-tech">
+          How sure this result is: {{ confidencePercent.toFixed(0) }}%.
+        </p>
       </aside>
 
       <div class="result-main">
         <header class="result-head">
-          <h2>Analysis Result</h2>
-          <p>Core signals, scam stage factors, and the next actions for verification.</p>
+          <h2 id="result-heading" tabindex="-1">Analysis Result</h2>
+          <p role="status">{{ analysisIntroLine }}</p>
         </header>
 
         <div class="content-row">
@@ -68,15 +157,20 @@ const nextActions = [
               <span class="card-inset card-inset--warn" aria-hidden="true">
                 <img src="https://img.icons8.com/cotton/64/mission-of-a-company--v2.png" alt="" />
               </span>
-              <h3>Why this was flagged</h3>
+              <h3>Why this looks risky</h3>
             </div>
             <div v-if="result.indicators.length" class="detail-list">
-              <div v-for="item in result.indicators" :key="item" class="detail-row">
+              <div
+                v-for="(item, index) in result.indicators"
+                :key="item"
+                class="detail-row"
+                :class="{ 'detail-row--highlight': highlightKeySignals && index < 2 }"
+              >
                 <span class="detail-token detail-token--warn" aria-hidden="true"></span>
                 <p>{{ item }}</p>
               </div>
             </div>
-            <p v-else class="plain-block">No major indicator was triggered.</p>
+            <p v-else class="plain-block">No major warning signs were found.</p>
           </section>
 
           <section class="content-card content-card--mid content-card--signal">
@@ -84,42 +178,42 @@ const nextActions = [
               <span class="card-inset card-inset--ok" aria-hidden="true">
                 <img src="https://img.icons8.com/cotton/64/checklist--v1.png" alt="" />
               </span>
-              <h3>Detected stage of scam</h3>
+              <h3>Warning signs by strength</h3>
             </div>
             <div v-if="result.factors.length" class="detail-list">
-              <div v-for="factor in result.factors" :key="factor.label" class="detail-row">
+              <div
+                v-for="(factor, index) in result.factors"
+                :key="factor.label"
+                class="detail-row"
+                :class="{ 'detail-row--highlight': highlightKeySignals && index < 2 }"
+              >
                 <span class="detail-token detail-token--ok" aria-hidden="true"></span>
-                <p>{{ factor.label }} ({{ factor.severity }}, +{{ factor.weight }})</p>
+                <p>{{ factor.label }} · {{ severityLabel(factor.severity) }}</p>
               </div>
             </div>
-            <p v-else class="plain-block">No factor contributed to the score.</p>
+            <p v-else class="plain-block">No warning sign affected the score.</p>
           </section>
         </div>
 
         <section class="actions-block" aria-label="More options">
           <h3>Next actions</h3>
-          <a
-            v-for="action in nextActions"
-            :key="action.label"
-            class="action-card"
-            :href="action.href"
-          >
-            <span>{{ action.label }}</span>
-            <span class="action-arrow" aria-hidden="true"></span>
-          </a>
+          <div class="actions-grid">
+            <a
+              v-for="action in nextActions"
+              :key="action.label"
+              class="action-card"
+              :href="action.href"
+            >
+              <span>{{ action.label }}</span>
+              <span class="action-arrow" aria-hidden="true"></span>
+            </a>
+          </div>
         </section>
 
-        <div class="content-row">
-          <section class="content-card content-card--mid content-card--full">
-            <div class="card-head">
-              <span class="card-inset" aria-hidden="true">
-                <img src="https://img.icons8.com/cotton/64/edit--v2.png" alt="" />
-              </span>
-              <h3>Submitted input snapshot</h3>
-            </div>
-            <p class="plain-block">{{ requestSummary }}</p>
-          </section>
-        </div>
+        <details v-if="extractedTextPreview" class="extracted-preview" aria-label="Extracted text preview">
+          <summary>Extracted text preview</summary>
+          <p>{{ extractedTextPreview }}</p>
+        </details>
       </div>
     </div>
   </section>
@@ -128,6 +222,10 @@ const nextActions = [
 <style scoped>
 .result-panel {
   background: var(--ms-color-surface-page-start);
+}
+
+.result-panel--focus {
+  box-shadow: inset 0 0 0 2px rgba(15, 82, 186, 0.35);
 }
 
 .result-split {
@@ -204,6 +302,13 @@ const nextActions = [
   letter-spacing: 0.08em;
   margin-bottom: 2px;
   text-transform: uppercase;
+}
+
+.score-tech {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  margin: 14px 0 0;
 }
 
 .result-main {
@@ -309,6 +414,12 @@ h3 {
   padding: 10px 10px;
 }
 
+.detail-row--highlight {
+  background: rgba(255, 239, 192, 0.8);
+  box-shadow: inset 0 0 0 1px rgba(188, 29, 12, 0.25);
+  animation: signalPulse 1.2s ease-in-out 2;
+}
+
 .detail-row p {
   line-height: 1.34;
   margin: 0;
@@ -346,6 +457,12 @@ h3 {
   margin-bottom: 14px;
 }
 
+.actions-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+}
+
 .action-card {
   align-items: center;
   background: var(--ms-color-surface-page-start);
@@ -353,7 +470,6 @@ h3 {
   display: flex;
   font-weight: 500;
   justify-content: space-between;
-  margin-bottom: 12px;
   min-height: 58px;
   padding: 16px;
   text-decoration: none;
@@ -363,6 +479,29 @@ h3 {
 .action-card:hover,
 .action-card:focus-visible {
   background: var(--ms-color-border-soft);
+}
+
+.extracted-preview {
+  background: var(--ms-color-surface-subtle);
+  margin: 0 0 16px;
+  padding: 14px 16px;
+}
+
+.extracted-preview summary {
+  color: var(--ms-color-text-primary);
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.extracted-preview p {
+  color: var(--ms-color-text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin: 10px 0 0;
+  white-space: pre-wrap;
 }
 
 .action-arrow {
@@ -393,9 +532,18 @@ h3 {
   padding: 12px;
 }
 
-.content-card--full {
-  grid-column: 1 / -1;
-  min-height: 0;
+@keyframes signalPulse {
+  0% {
+    box-shadow: inset 0 0 0 1px rgba(188, 29, 12, 0.25);
+  }
+
+  50% {
+    box-shadow: inset 0 0 0 2px rgba(188, 29, 12, 0.45);
+  }
+
+  100% {
+    box-shadow: inset 0 0 0 1px rgba(188, 29, 12, 0.25);
+  }
 }
 
 @media (max-width: 980px) {
@@ -409,6 +557,10 @@ h3 {
   }
 
   .content-row {
+    grid-template-columns: 1fr;
+  }
+
+  .actions-grid {
     grid-template-columns: 1fr;
   }
 }

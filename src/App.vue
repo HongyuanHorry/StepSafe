@@ -5,13 +5,19 @@ import SubmissionPanel from './components/SubmissionPanel.vue'
 import { analyzeTextContent, extractTextFromSubmission } from './services/scamAnalysisEngine'
 
 const isAnalyzing = ref(false)
-const requestSummary = ref('')
 const result = ref(null)
+const extractedTextPreview = ref('')
 const submissionQuickMode = ref('text')
 const isMenuOpen = ref(false)
+const highlightKeySignals = ref(false)
+const menuToggleButton = ref(null)
+const CHECK_SCAM_TARGET_ID = 'check-scam-panel'
+const EXTRACTED_PREVIEW_MAX_CHARS = 420
+
+let highlightTimer = null
 
 const topActions = [
-  { label: 'Suspicious message', mode: 'text', action: 'preview-high' },
+  { label: 'Suspicious message', mode: 'text', action: 'open-check' },
   { label: 'Upload job PDF', mode: 'pdf', action: 'open-check' },
   { label: 'Verify recruiter', mode: 'link', action: 'open-check' },
 ]
@@ -130,6 +136,14 @@ function navigateToSection(sectionId) {
   scrollToSection(sectionId)
 }
 
+function goToCheckScam() {
+  navigateToSection(CHECK_SCAM_TARGET_ID)
+}
+
+function externalAriaLabel(label) {
+  return `${label} (opens in a new tab)`
+}
+
 function buildPreviewResult(tier) {
   if (tier === 'low') {
     return {
@@ -185,8 +199,7 @@ function buildPreviewResult(tier) {
 
 function previewRiskState(tier) {
   result.value = buildPreviewResult(tier)
-  requestSummary.value =
-    'Preview mode: simulated suspicious employment and task message for risk-state visualization.'
+  extractedTextPreview.value = ''
 
   nextTick(() => {
     scrollToSection('result-section')
@@ -195,21 +208,29 @@ function previewRiskState(tier) {
 
 function clearPreviewState() {
   result.value = null
-  requestSummary.value = ''
+  extractedTextPreview.value = ''
 }
 
 function triggerTopAction(action) {
   isMenuOpen.value = false
   submissionQuickMode.value = action.mode
-  scrollToSection('check-section')
-
-  if (action.action === 'preview-high') {
-    previewRiskState('high')
-  }
+  goToCheckScam()
 }
 
 function toggleMenu() {
   isMenuOpen.value = !isMenuOpen.value
+}
+
+function handleGlobalKeydown(event) {
+  if (event.key !== 'Escape') return
+  if (!isMenuOpen.value) return
+
+  isMenuOpen.value = false
+  nextTick(() => {
+    if (menuToggleButton.value instanceof HTMLElement) {
+      menuToggleButton.value.focus()
+    }
+  })
 }
 
 function initRevealObserver() {
@@ -239,17 +260,46 @@ function initRevealObserver() {
 
 onMounted(() => {
   initRevealObserver()
+  window.addEventListener('keydown', handleGlobalKeydown)
 })
 
 watch(showResult, async (visible) => {
-  if (!visible) return
+  if (!visible) {
+    highlightKeySignals.value = false
+    return
+  }
+
   await nextTick()
+  scrollToSection('result-section')
   initRevealObserver()
+
+  const resultHeading = document.getElementById('result-heading')
+  if (resultHeading instanceof HTMLElement) {
+    window.setTimeout(() => {
+      resultHeading.focus({ preventScroll: true })
+    }, 260)
+  }
+
+  highlightKeySignals.value = true
+
+  if (highlightTimer) {
+    clearTimeout(highlightTimer)
+  }
+
+  highlightTimer = window.setTimeout(() => {
+    highlightKeySignals.value = false
+  }, 3200)
 })
 
 onBeforeUnmount(() => {
   if (revealObserver) {
     revealObserver.disconnect()
+  }
+
+  window.removeEventListener('keydown', handleGlobalKeydown)
+
+  if (highlightTimer) {
+    clearTimeout(highlightTimer)
   }
 })
 
@@ -258,7 +308,14 @@ async function handleSubmission(payload) {
   result.value = null
 
   const textContent = await extractTextFromSubmission(payload)
-  requestSummary.value = textContent.slice(0, 1200)
+  if (payload.inputType === 'pdf') {
+    extractedTextPreview.value = textContent.slice(0, EXTRACTED_PREVIEW_MAX_CHARS)
+    if (textContent.length > EXTRACTED_PREVIEW_MAX_CHARS) {
+      extractedTextPreview.value += '...'
+    }
+  } else {
+    extractedTextPreview.value = ''
+  }
 
   setTimeout(() => {
     result.value = analyzeTextContent(textContent)
@@ -276,10 +333,34 @@ async function handleSubmission(payload) {
           <span>StepSafe</span>
         </a>
 
+        <nav class="top-nav-desktop" aria-label="Primary navigation">
+          <button type="button" class="top-nav-link" @click="navigateToSection('home-section')">
+            Home
+          </button>
+          <button
+            type="button"
+            class="top-nav-link top-nav-link--strong"
+            @click="goToCheckScam"
+          >
+            Check Scam
+          </button>
+          <button
+            v-for="section in primarySections"
+            :key="`desktop-${section.id}`"
+            type="button"
+            class="top-nav-link"
+            @click="navigateToSection(section.id)"
+          >
+            {{ section.label }}
+          </button>
+        </nav>
+
         <button
+          ref="menuToggleButton"
           type="button"
           class="top-hamburger"
           aria-label="Toggle navigation"
+          aria-controls="mobile-site-menu"
           :aria-expanded="isMenuOpen"
           @click="toggleMenu"
         >
@@ -289,6 +370,7 @@ async function handleSubmission(payload) {
         </button>
 
         <nav
+          id="mobile-site-menu"
           class="top-menu"
           :class="{ 'top-menu--open': isMenuOpen }"
           aria-label="Site navigation"
@@ -302,7 +384,7 @@ async function handleSubmission(payload) {
               <button
                 type="button"
                 class="menu-link menu-link--check"
-                @click="navigateToSection('check-section')"
+                @click="goToCheckScam"
               >
                 Check Scam
               </button>
@@ -347,7 +429,9 @@ async function handleSubmission(payload) {
               Submit a suspicious message, PDF posting, or recruitment link. The prototype returns a
               risk tier, confidence, indicators, and plain-language reason.
             </p>
-            <a class="cta-primary" href="#check-section">Check scam now</a>
+            <a class="cta-primary" href="#check-section" @click.prevent="goToCheckScam">
+              Check scam now
+            </a>
           </div>
           <div class="hero-art" aria-hidden="true">
             <img src="/icons/EmploymentScamWarningPic.png" alt="" />
@@ -367,6 +451,8 @@ async function handleSubmission(payload) {
                   :key="item.href"
                   class="resource-row"
                   :href="item.href"
+                  :aria-label="externalAriaLabel(item.title)"
+                  title="Opens in a new tab"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -395,6 +481,8 @@ async function handleSubmission(payload) {
                   :key="item.href"
                   class="resource-row"
                   :href="item.href"
+                  :aria-label="externalAriaLabel(item.title)"
+                  title="Opens in a new tab"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -418,7 +506,7 @@ async function handleSubmission(payload) {
         class="flow-section flow-section--check layer-start reveal-on-scroll"
         aria-label="Check section"
       >
-        <div class="container-shell">
+        <div id="check-scam-panel" class="container-shell">
           <SubmissionPanel :quick-mode="submissionQuickMode" @submit="handleSubmission" />
         </div>
       </section>
@@ -465,7 +553,11 @@ async function handleSubmission(payload) {
         aria-label="Result section"
       >
         <div class="container-shell">
-          <ResultPanel :result="result" :request-summary="requestSummary" />
+          <ResultPanel
+            :result="result"
+            :highlight-key-signals="highlightKeySignals"
+            :extracted-text-preview="extractedTextPreview"
+          />
         </div>
       </section>
 
@@ -542,6 +634,8 @@ async function handleSubmission(payload) {
                   :key="item.href"
                   class="site-footer__link"
                   :href="item.href"
+                  :aria-label="externalAriaLabel(item.label)"
+                  title="Opens in a new tab"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -570,6 +664,8 @@ async function handleSubmission(payload) {
                   :key="item.href"
                   class="site-footer__link"
                   :href="item.href"
+                  :aria-label="externalAriaLabel(item.label)"
+                  title="Opens in a new tab"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -675,11 +771,39 @@ async function handleSubmission(payload) {
   width: auto;
 }
 
+.top-nav-desktop {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.top-nav-link {
+  background: transparent;
+  border: 0;
+  color: rgb(255, 255, 255);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 400;
+  min-height: 32px;
+  padding: 6px 10px;
+  text-transform: uppercase;
+}
+
+.top-nav-link:hover,
+.top-nav-link:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.top-nav-link--strong {
+  font-weight: 500;
+}
+
 .top-hamburger {
   background: transparent;
   border: 0;
   cursor: pointer;
-  display: inline-block;
+  display: none;
   height: 28px;
   margin-left: auto;
   padding: 6px 4px;
@@ -700,6 +824,7 @@ async function handleSubmission(payload) {
 
 .top-menu {
   background: rgb(26, 25, 24);
+  display: none;
   inset: calc(100% + 4px) 48px auto;
   max-height: 0;
   opacity: 0;
@@ -848,7 +973,7 @@ h1 {
 .info-grid__inner {
   display: grid;
   align-items: start;
-  gap: 12px;
+  gap: 6px;
   grid-template-columns: 1fr 1fr;
 }
 
@@ -881,14 +1006,14 @@ h1 {
 
 .info-rows {
   display: grid;
-  gap: 10px;
+  gap: 5px;
 }
 
 .resource-row {
   background: var(--ms-color-surface-page-start);
   color: var(--ms-color-text-primary);
   display: grid;
-  gap: 12px;
+  gap: 6px;
   grid-template-columns: 52px minmax(0, 1fr);
   min-height: 94px;
   padding: 20px;
@@ -1176,7 +1301,16 @@ h1 {
     padding: 0 24px;
   }
 
+  .top-nav-desktop {
+    display: none;
+  }
+
+  .top-hamburger {
+    display: inline-block;
+  }
+
   .top-menu {
+    display: block;
     inset: calc(100% + 4px) 24px auto;
   }
 
