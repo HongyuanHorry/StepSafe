@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ResultPanel from './components/ResultPanel.vue'
 import SubmissionPanel from './components/SubmissionPanel.vue'
-import { analyzeTextContent, extractTextFromSubmission } from './services/scamAnalysisEngine'
+import { analyzeTextContentByBackend, extractTextFromSubmission } from './services/scamAnalysisEngine'
 
 const isAnalyzing = ref(false)
 const result = ref(null)
@@ -317,8 +317,13 @@ async function handleSubmission(payload) {
     extractedTextPreview.value = ''
   }
 
-  setTimeout(() => {
-    result.value = analyzeTextContent(textContent)
+  setTimeout(async () => {
+    result.value = await analyzeTextContentByBackend(textContent, {
+      inputType: payload.inputType,
+      message_type: payload.inputType === 'link' ? 'Email' : 'Email',
+      platform: payload.inputType === 'link' ? 'LinkedIn' : 'Gmail',
+      job_type: 'Remote',
+    })
     isAnalyzing.value = false
   }, 250)
 }
