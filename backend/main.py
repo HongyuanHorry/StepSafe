@@ -4,7 +4,11 @@ import os
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import pymupdf
+
+from backend.ml.inference import predict_message
+from backend.ml.rules import build_analysis_response
 
 app = FastAPI(title="StepSafe PyMuPDF API", version="1.0.0")
 
@@ -19,6 +23,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class AnalyzeRequest(BaseModel):
+    inputType: str
+    text: str
+    message_type: str = "Email"
+    platform: str = "Unknown"
+    job_type: str = "Unknown"
+    contains_link: int | None = None
+    contains_email: int | None = None
+    has_payment_request: int | None = None
+    asks_personal_info: int | None = None
 
 
 @app.get("/api/pymupdf/health")
@@ -89,3 +105,19 @@ async def parse_pdf(
         }
     except Exception as exc:  # pragma: no cover - defensive API guard
         raise HTTPException(status_code=400, detail=f"Failed to parse PDF: {exc}") from exc
+
+
+@app.post("/api/analyze")
+def analyze(req: AnalyzeRequest) -> dict[str, object]:
+    try:
+        payload = req.model_dump()
+
+        row, scam_pred, scam_prob, type_pred = predict_message(payload)
+        result = build_analysis_response(row, scam_pred, scam_prob, type_pred)
+
+        return result
+
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Analyze failed: {exc}") from exc
