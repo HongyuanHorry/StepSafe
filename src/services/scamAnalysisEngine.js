@@ -5,8 +5,9 @@ import {
   UNKNOWN_TYPE,
 } from '../constants/scamRules'
 
-const PYMUPDF_PARSE_ENDPOINT = '/api/pymupdf/parse'
-const ANALYZE_ENDPOINT = '/api/analyze'
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+const PYMUPDF_PARSE_ENDPOINT = `${API_BASE}/api/pymupdf/parse`
+const ANALYZE_ENDPOINT = `${API_BASE}/api/analyze`
 
 function clampScore(score) {
   return Math.max(0, Math.min(100, score))
