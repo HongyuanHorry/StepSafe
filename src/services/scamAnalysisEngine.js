@@ -5,7 +5,9 @@ import {
   UNKNOWN_TYPE,
 } from '../constants/scamRules'
 
-const PYMUPDF_PARSE_ENDPOINT = '/api/pymupdf/parse'
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+const PYMUPDF_PARSE_ENDPOINT = `${API_BASE}/api/pymupdf/parse`
+const ANALYZE_ENDPOINT = `${API_BASE}/api/analyze`
 
 function clampScore(score) {
   return Math.max(0, Math.min(100, score))
@@ -211,4 +213,87 @@ export function analyzeTextContent(content) {
     analysisExcerpt: buildAnalysisExcerpt(analysisInput),
     explanation: buildExplanation(matches, riskScore, typeResult.scamType),
   }
+}
+
+function normalizeRiskLevel(level, score) {
+  if (level === 'SEVERE') return 'Critical'
+  if (level === 'HIGH') return 'High'
+  if (level === 'MEDIUM') return 'Medium'
+  if (level === 'LOW') return 'Low'
+  return getRiskTier(score || 0)
+}
+
+function normalizeBackendResult(result) {
+  const explanation = Array.isArray(result?.explanation)
+    ? result.explanation
+    : [result?.explanation || 'No explanation available.']
+
+  const normalizedFactors = Array.isArray(result?.factors)
+    ? result.factors.map((item) =>
+        typeof item === 'string'
+          ? { label: item, weight: null, severity: null }
+          : item
+      )
+    : []
+
+  return {
+    ...result,
+    riskTier: normalizeRiskLevel(result?.riskLevel, result?.riskScore),
+    classificationConfidence:
+      result?.classificationConfidence ?? result?.confidence ?? 0,
+    classificationConfidenceThreshold:
+      result?.classificationConfidenceThreshold ?? 0.5,
+    explanation,
+    factors: normalizedFactors,
+  }
+}
+
+export async function analyzeTextContentByBackend(content, metadata = {}) {
+  const analysisInput = toAnalysisInput(content)
+
+  if (!analysisInput) {
+    return normalizeBackendResult({
+      suspicious: false,
+      binaryLabel: 'Not suspicious',
+      riskScore: 0,
+      riskLevel: 'LOW',
+      scamType: 'unknown or unclear',
+      confidence: 0,
+      indicators: [],
+      factors: [],
+      explanation: 'No readable content was available for analysis.',
+      stages: {
+        firstContact: false,
+        trustBuilding: false,
+        taskAssignment: false,
+        paymentRequest: false,
+        paymentRequestNextLikely: false,
+      },
+    })
+  }
+
+  const payload = {
+    inputType: metadata.inputType || 'text',
+    text: analysisInput,
+    message_type: metadata.message_type || 'Email',
+    platform: metadata.platform || 'Gmail',
+    job_type: metadata.job_type || 'Remote',
+  }
+
+  const response = await fetch(ANALYZE_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+
+  const result = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    const detail = typeof result?.detail === 'string' ? result.detail : ''
+    throw new Error(detail || `Analyze request failed with status ${response.status}`)
+  }
+
+  return normalizeBackendResult(result)
 }
