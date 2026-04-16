@@ -293,3 +293,25 @@ async def analyze_pdf(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Analyze PDF failed: {exc}") from exc
+
+
+@app.get("/api/debug-db")
+def debug_db():
+    try:
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT current_database(), current_user;")
+                row = cur.fetchone()
+                return {
+                    "ok": True,
+                    "database": row[0],
+                    "user": row[1],
+                }
+        finally:
+            conn.close()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+        }
