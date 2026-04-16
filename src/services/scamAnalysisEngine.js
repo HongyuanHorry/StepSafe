@@ -8,6 +8,10 @@ import {
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 const PYMUPDF_PARSE_ENDPOINT = `${API_BASE}/api/pymupdf/parse`
 const ANALYZE_ENDPOINT = `${API_BASE}/api/analyze`
+const ABN_LOOKUP_ENDPOINT = `${API_BASE}/api/abn/lookup`
+
+console.log('VITE_API_BASE_URL =', API_BASE)
+console.log('ABN_LOOKUP_ENDPOINT =', ABN_LOOKUP_ENDPOINT)
 
 function clampScore(score) {
   return Math.max(0, Math.min(100, score))
@@ -296,4 +300,19 @@ export async function analyzeTextContentByBackend(content, metadata = {}) {
   }
 
   return normalizeBackendResult(result)
+}
+
+export async function lookupAbnByBackend(query) {
+  const response = await fetch(
+    `${ABN_LOOKUP_ENDPOINT}?query=${encodeURIComponent(query)}`,
+  )
+
+  const result = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    const detail = typeof result?.detail === 'string' ? result.detail : ''
+    throw new Error(detail || `ABN lookup failed with status ${response.status}`)
+  }
+
+  return result
 }

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
-
+import { lookupAbnByBackend } from '@/services/scamAnalysisEngine'
 const props = defineProps({
   quickMode: {
     type: String,
@@ -178,7 +178,7 @@ async function searchAbn() {
   abnLookupState.queried = true
 
   try {
-    const response = await fetch(`/api/abn/lookup?query=${encodeURIComponent(query)}`)
+    const result = await lookupAbnByBackend(query)
     const payload = await response.json().catch(() => ({}))
 
     if (!response.ok) {

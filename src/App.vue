@@ -4,7 +4,7 @@ import { DotLottieVue } from '@lottiefiles/dotlottie-vue'
 import { AlertTriangle, ArrowRight, BookOpen, LifeBuoy, ShieldCheck } from 'lucide-vue-next'
 import ResultPanel from './components/ResultPanel.vue'
 import SubmissionPanel from './components/SubmissionPanel.vue'
-import { analyzeTextContentByBackend, extractTextFromSubmission } from './services/scamAnalysisEngine'
+import { analyzeTextContentByBackend, extractTextFromSubmission, lookupAbnByBackend } from './services/scamAnalysisEngine'
 
 const isAnalyzing = ref(false)
 const result = ref(null)
@@ -697,12 +697,7 @@ async function searchAbn() {
   confirmedAbn.value = null
 
   try {
-    const response = await fetch(`/api/abn/lookup?query=${encodeURIComponent(query)}`)
-    const result = await response.json().catch(() => ({}))
-
-    if (!response.ok) {
-      throw new Error(result.detail || 'ABN lookup failed')
-    }
+    const result = await lookupAbnByBackend(query)
 
     abnResults.value = Array.isArray(result.results) ? result.results : []
 
