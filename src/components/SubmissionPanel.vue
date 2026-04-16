@@ -6,12 +6,47 @@ const props = defineProps({
     type: String,
     default: 'text',
   },
+  isAnalyzing: {
+    type: Boolean,
+    default: false,
+  },
+  abnQuery: {
+    type: String,
+    default: '',
+  },
+  abnResults: {
+    type: Array,
+    default: () => [],
+  },
+  abnLoading: {
+    type: Boolean,
+    default: false,
+  },
+  abnError: {
+    type: String,
+    default: '',
+  },
+  confirmedAbn: {
+    type: Object,
+    default: null,
+  },
 })
 
-const emit = defineEmits(['submit'])
+const emit = defineEmits([
+  'submit',
+  'update:abn-query',
+  'search-abn',
+  'clear-abn',
+  'confirm-abn',
+])
 
 const STORAGE_LAST_MODE_KEY = 'stepsafe:last-input-mode'
 const STORAGE_RECENT_CHECKS_KEY = 'stepsafe:recent-checks'
+const MAX_TEXT_LENGTH = 6000
+const MAX_LINK_LENGTH = 2048
+const MAX_NAME_LENGTH = 80
+const MAX_PDF_SIZE_BYTES = 8 * 1024 * 1024
+const ABN_RESULTS_LIMIT = 8
 
 const form = reactive({
   text: '',
@@ -21,17 +56,31 @@ const form = reactive({
 })
 
 const inputType = ref(readStoredInputMode())
+const pdfInputRef = ref(null)
 const errorMessage = ref('')
 const recentChecks = ref(readStoredRecentChecks())
 const isQuickControlsOpen = ref(false)
+const abnLookupState = reactive({
+  loading: false,
+  error: '',
+  queried: false,
+  usageMessage: '',
+  previewTier: '',
+  selectedAbn: '',
+  results: [],
+})
+
+const abnPreviewModes = [
+  { label: 'Exact match', tier: 'exact' },
+  { label: 'Name match', tier: 'name' },
+  { label: 'Inactive ABN', tier: 'inactive' },
+]
 
 const sampleInputs = {
-  low:
-    'Hello, we saw your profile and invite you to apply. Interview details are on our official site. No upfront payment is required.',
+  low: 'Hello, thank you for your application. Please respond before the deadline today so we can confirm interview slots this week. No payment is required for this role.',
   medium:
-    'Great part-time task role. Complete simple review tasks and receive commission quickly. You can unlock more rewards after the first recharge.',
-  high:
-    'Urgent: complete these simple tasks now and earn guaranteed commission. Transfer a verification fee immediately to release your payout.',
+    'This role promises easy money and no experience needed high income. Act now because this offer is today only.',
+  high: 'Urgent: complete simple task batches now and earn guaranteed income. Transfer a registration fee immediately to release your payout today only.',
 }
 
 const inputLabel = computed(() => {
@@ -68,7 +117,10 @@ function readStoredRecentChecks() {
 
 function persistRecentChecks() {
   if (typeof window === 'undefined') return
-  window.localStorage.setItem(STORAGE_RECENT_CHECKS_KEY, JSON.stringify(recentChecks.value.slice(0, 3)))
+  window.localStorage.setItem(
+    STORAGE_RECENT_CHECKS_KEY,
+    JSON.stringify(recentChecks.value.slice(0, 3)),
+  )
 }
 
 function applySampleInput(level) {
@@ -80,23 +132,233 @@ function applySampleInput(level) {
 function clearCurrentInput() {
   form.text = ''
   form.link = ''
-  form.pdfFile = null
+  clearSelectedPdf()
   errorMessage.value = ''
+}
+
+function clearSelectedPdf() {
+  form.pdfFile = null
+  if (pdfInputRef.value instanceof HTMLInputElement) {
+    pdfInputRef.value.value = ''
+  }
+}
+
+function clearAbnLookupState() {
+  abnLookupState.loading = false
+  abnLookupState.error = ''
+  abnLookupState.queried = false
+  abnLookupState.usageMessage = ''
+  abnLookupState.previewTier = ''
+  abnLookupState.selectedAbn = ''
+  abnLookupState.results = []
+}
+
+function resetAbnLookup() {
+  form.recruiterName = ''
+  clearAbnLookupState()
+}
+
+async function searchAbn() {
+  const query = normalizeInput(form.recruiterName)
+  if (!query) {
+    abnLookupState.error = 'Enter ABN or business name before searching.'
+    return
+  }
+
+  if (query.length > MAX_NAME_LENGTH) {
+    abnLookupState.error = `ABN query must be ${MAX_NAME_LENGTH} characters or fewer.`
+    return
+  }
+
+  abnLookupState.loading = true
+  abnLookupState.error = ''
+  abnLookupState.usageMessage = ''
+  abnLookupState.previewTier = ''
+  abnLookupState.results = []
+  abnLookupState.queried = true
+
+  try {
+    const response = await fetch(`/api/abn/lookup?query=${encodeURIComponent(query)}`)
+    const payload = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+      throw new Error(payload?.detail || 'ABN lookup request failed.')
+    }
+
+    const results = Array.isArray(payload?.results) ? payload.results : []
+    abnLookupState.results = results.slice(0, ABN_RESULTS_LIMIT)
+    abnLookupState.usageMessage = String(payload?.message ?? '').trim()
+
+    if (!abnLookupState.results.length) {
+      abnLookupState.error = 'No matching ABN records were returned.'
+    }
+  } catch (error) {
+    abnLookupState.error = error instanceof Error ? error.message : 'ABN lookup failed.'
+  } finally {
+    abnLookupState.loading = false
+  }
+}
+
+function buildAbnPreviewResults(tier) {
+  if (tier === 'exact') {
+    return [
+      {
+        abn: '51824753556',
+        name: 'STEPSAFE PTY LTD',
+        status: 'Active',
+        state: 'VIC',
+        postcode: '3000',
+        matchScore: 100,
+      },
+    ]
+  }
+
+  if (tier === 'inactive') {
+    return [
+      {
+        abn: '78640259366',
+        name: 'SAMPLE RECRUITMENT GROUP',
+        status: 'Cancelled',
+        state: 'NSW',
+        postcode: '2000',
+        matchScore: 88,
+      },
+    ]
+  }
+
+  return [
+    {
+      abn: '92631844090',
+      name: 'SAMPLE EMPLOYMENT SERVICES',
+      status: 'Active',
+      state: 'QLD',
+      postcode: '4000',
+      matchScore: 91,
+    },
+    {
+      abn: '90144568903',
+      name: 'SAMPLE EMPLOYMENT CONSULTING',
+      status: 'Active',
+      state: 'VIC',
+      postcode: '3004',
+      matchScore: 79,
+    },
+  ]
+}
+
+function previewAbnResult(tier) {
+  abnLookupState.loading = false
+  abnLookupState.error = ''
+  abnLookupState.queried = true
+  abnLookupState.previewTier = tier
+  abnLookupState.selectedAbn = ''
+  abnLookupState.results = buildAbnPreviewResults(tier)
+  abnLookupState.usageMessage = 'Preview mode: expected ABN display before backend integration.'
+}
+
+function confirmAbn(record) {
+  const abn = normalizeInput(record?.abn)
+  if (!abn) {
+    abnLookupState.error = 'This record does not contain a usable ABN value.'
+    return
+  }
+
+  form.recruiterName = abn
+  abnLookupState.selectedAbn = abn
+  abnLookupState.error = ''
+}
+
+function normalizeInput(value) {
+  return String(value ?? '')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ' ')
+    .trim()
+}
+
+function isLocalOrPrivateHostname(hostname) {
+  const host = String(hostname ?? '')
+    .trim()
+    .toLowerCase()
+  if (!host) return true
+  if (host === 'localhost' || host.endsWith('.local')) return true
+  if (host === '0.0.0.0' || host.startsWith('127.')) return true
+  if (host.startsWith('10.') || host.startsWith('192.168.')) return true
+  if (host.startsWith('169.254.')) return true
+  if (host.startsWith('172.')) {
+    const block = Number(host.split('.')[1])
+    if (!Number.isNaN(block) && block >= 16 && block <= 31) return true
+  }
+  return false
 }
 
 function onFileChange(event) {
   const selected = event.target.files?.[0] ?? null
+
+  if (!selected) {
+    clearSelectedPdf()
+    return
+  }
+
+  if (selected && selected.size > MAX_PDF_SIZE_BYTES) {
+    clearSelectedPdf()
+    errorMessage.value = 'PDF must be smaller than 8MB.'
+    return
+  }
+
+  if (
+    selected &&
+    selected.type !== 'application/pdf' &&
+    !String(selected.name ?? '')
+      .toLowerCase()
+      .endsWith('.pdf')
+  ) {
+    clearSelectedPdf()
+    errorMessage.value = 'Only PDF files are accepted.'
+    return
+  }
+
   form.pdfFile = selected
   errorMessage.value = ''
 }
 
 function validatePayload() {
-  if (inputType.value === 'text' && !form.text.trim()) {
+  const normalizedText = normalizeInput(form.text)
+  const normalizedLink = normalizeInput(form.link)
+
+  if (normalizeInput(form.recruiterName).length > MAX_NAME_LENGTH) {
+    return `ABN query must be ${MAX_NAME_LENGTH} characters or fewer.`
+  }
+
+  if (inputType.value === 'text' && !normalizedText) {
     return 'Please paste a recruiter message before analysis.'
   }
 
-  if (inputType.value === 'link' && !form.link.trim()) {
+  if (inputType.value === 'text' && normalizedText.length > MAX_TEXT_LENGTH) {
+    return `Message is too long. Keep it within ${MAX_TEXT_LENGTH} characters.`
+  }
+
+  if (inputType.value === 'link' && !normalizedLink) {
     return 'Please enter a link before analysis.'
+  }
+
+  if (inputType.value === 'link' && normalizedLink.length > MAX_LINK_LENGTH) {
+    return `Link is too long. Keep it within ${MAX_LINK_LENGTH} characters.`
+  }
+
+  if (inputType.value === 'link') {
+    let parsed
+    try {
+      parsed = new URL(normalizedLink)
+    } catch {
+      return 'Please enter a valid URL starting with https:// or http://.'
+    }
+
+    if (!['https:', 'http:'].includes(parsed.protocol)) {
+      return 'Only http/https links are allowed.'
+    }
+
+    if (isLocalOrPrivateHostname(parsed.hostname)) {
+      return 'Local or private network addresses are blocked for security.'
+    }
   }
 
   if (inputType.value === 'pdf' && !form.pdfFile) {
@@ -107,6 +369,8 @@ function validatePayload() {
 }
 
 function submitForAnalysis() {
+  if (props.isAnalyzing) return
+
   const validationError = validatePayload()
   if (validationError) {
     errorMessage.value = validationError
@@ -114,12 +378,16 @@ function submitForAnalysis() {
   }
 
   errorMessage.value = ''
+  const safeText = normalizeInput(form.text).slice(0, MAX_TEXT_LENGTH)
+  const safeLink = normalizeInput(form.link).slice(0, MAX_LINK_LENGTH)
+  const safeRecruiterName = normalizeInput(form.recruiterName).slice(0, MAX_NAME_LENGTH)
+
   const payload = {
     inputType: inputType.value,
-    text: form.text,
-    link: form.link,
+    text: safeText,
+    link: safeLink,
     pdfFile: form.pdfFile,
-    recruiterName: form.recruiterName,
+    recruiterName: safeRecruiterName,
   }
 
   emit('submit', payload)
@@ -146,9 +414,7 @@ function reuseRecentCheck(item) {
   form.link = item.link ?? ''
   form.pdfFile = null
   errorMessage.value =
-    item.inputType === 'pdf'
-      ? 'PDF records require re-uploading the file before analysis.'
-      : ''
+    item.inputType === 'pdf' ? 'PDF records require re-uploading the file before analysis.' : ''
 }
 
 function getRecentLabel(item) {
@@ -193,6 +459,37 @@ watch(
   },
   { immediate: true },
 )
+
+watch(
+  () => form.text,
+  (value) => {
+    if (value.length > MAX_TEXT_LENGTH) {
+      form.text = value.slice(0, MAX_TEXT_LENGTH)
+    }
+  },
+)
+
+watch(
+  () => form.link,
+  (value) => {
+    if (value.length > MAX_LINK_LENGTH) {
+      form.link = value.slice(0, MAX_LINK_LENGTH)
+    }
+  },
+)
+
+watch(
+  () => form.recruiterName,
+  (value) => {
+    if (value.length > MAX_NAME_LENGTH) {
+      form.recruiterName = value.slice(0, MAX_NAME_LENGTH)
+    }
+
+    if (abnLookupState.selectedAbn && normalizeInput(value) !== abnLookupState.selectedAbn) {
+      abnLookupState.selectedAbn = ''
+    }
+  },
+)
 </script>
 
 <template>
@@ -203,10 +500,9 @@ watch(
       </div>
       <div>
         <p class="head-kicker">Core workflow</p>
-        <h2>Check scam</h2>
+        <h2>Paste a message, link, or PDF</h2>
         <p class="head-summary">
-          Pick one input mode, provide evidence, then run analysis to receive a risk result and scam
-          stage explanation.
+          Choose Text, Link, or PDF. Then run a quick scan to get your risk result and next steps.
         </p>
       </div>
     </div>
@@ -219,41 +515,132 @@ watch(
           type="button"
           class="mode-button"
           :class="{ 'mode-button--active': inputType === 'text' }"
+          role="tab"
+          :aria-selected="inputType === 'text'"
+          aria-controls="messageText"
           @click="inputType = 'text'"
         >
-          Paste recruiter message
-        </button>
-        <button
-          type="button"
-          class="mode-button"
-          :class="{ 'mode-button--active': inputType === 'pdf' }"
-          @click="inputType = 'pdf'"
-        >
-          Upload PDF
+          Text
         </button>
         <button
           type="button"
           class="mode-button"
           :class="{ 'mode-button--active': inputType === 'link' }"
+          role="tab"
+          :aria-selected="inputType === 'link'"
+          aria-controls="messageLink"
           @click="inputType = 'link'"
         >
-          Paste website link
+          Link
+        </button>
+        <button
+          type="button"
+          class="mode-button"
+          :class="{ 'mode-button--active': inputType === 'pdf' }"
+          role="tab"
+          :aria-selected="inputType === 'pdf'"
+          aria-controls="pdfInput"
+          @click="inputType = 'pdf'"
+        >
+          PDF
         </button>
 
         <div class="mode-field">
-          <label class="mode-input-row" for="recruiterName">Recruiter name</label>
+          <label class="mode-input-row" for="recruiterName">ABN lookup</label>
           <input
             id="recruiterName"
-            v-model="form.recruiterName"
+            :value="abnQuery"
             type="text"
-            placeholder="Optional"
+            placeholder="Enter ABN (11 digits) or business name"
+            maxlength="80"
+            autocomplete="off"
+            @input="emit('update:abn-query', $event.target.value)"
+            @keydown.enter.prevent="emit('search-abn')"
           />
+          <p class="field-helper">Search ABN registry, confirm a match, then continue analysis.</p>
+
+          <div class="abn-actions">
+            <button
+              type="button"
+              class="abn-search-btn"
+              :disabled="abnLoading"
+              @click="emit('search-abn')"
+            >
+              {{ abnLoading ? 'Searching ABN...' : 'Search ABN' }}
+            </button>
+            <button
+              v-if="abnResults.length > 0 || abnError"
+              type="button"
+              class="abn-reset-btn"
+              @click="emit('clear-abn')"
+            >
+              Clear
+            </button>
+          </div>
+
+          <div>
+            <!--
+              <div class="abn-preview" aria-label="ABN preview controls">
+                <p class="abn-preview__title">ABN preview</p>
+              <div class="abn-preview__chips">
+              <button
+                v-for="mode in abnPreviewModes"
+                :key="mode.tier"
+                type="button"
+                class="abn-preview-chip"
+                :class="{ 'abn-preview-chip--active': abnLookupState.previewTier === mode.tier }"
+                @click="previewAbnResult(mode.tier)"
+              >
+                {{ mode.label }}
+              </button>
+              </div>
+              </div>
+            -->
+          </div>
+
+          <div v-if="abnError" class="abn-error" role="alert">
+            {{ abnError }}
+          </div>
+
+          <div v-if="abnResults.length" class="abn-results" aria-label="ABN search results">
+            <p class="abn-results__title">ABN results</p>
+            <article
+              v-for="record in abnResults"
+              :key="record.abn || `${record.name}-${record.matchScore}`"
+              class="abn-result-card"
+              :class="{ 'abn-result-card--selected': confirmedAbn?.abn === record.abn }"
+            >
+              <p class="abn-result-card__name">{{ record.name || 'Unknown business' }}</p>
+              <p class="abn-result-card__meta">
+                ABN: {{ record.abn || 'N/A' }} | Status: {{ record.status || 'Unknown' }}
+                <span v-if="record.state"> | {{ record.state }}</span>
+                <span v-if="record.postcode"> {{ record.postcode }}</span>
+                <span v-if="record.matchScore !== undefined && record.matchScore !== null">
+                  | Match {{ record.matchScore }}
+                </span>
+              </p>
+              <button type="button" class="abn-confirm-btn" @click="emit('confirm-abn', record)">
+                {{ confirmedAbn?.abn === record.abn ? 'Confirmed' : 'Confirm ABN' }}
+              </button>
+            </article>
+          </div>
+
+          <div v-if="confirmedAbn" class="abn-confirmed">
+            <strong>Confirmed ABN for this session</strong>
+            <div>{{ confirmedAbn.name }}</div>
+            <div>ABN: {{ confirmedAbn.abn }}</div>
+            <div>Status: {{ confirmedAbn.status }}</div>
+          </div>
         </div>
       </aside>
 
-      <div class="compose-pane" @keydown="handleComposeKeydown">
+      <div
+        class="compose-pane"
+        :class="{ 'compose-pane--scanning': isAnalyzing }"
+        @keydown="handleComposeKeydown"
+      >
         <div class="compose-head">
-          <p>Evidence Input</p>
+          <p>Evidence input</p>
           <p class="compose-head__mode">{{ inputLabel }}</p>
         </div>
 
@@ -263,8 +650,11 @@ watch(
             id="messageText"
             v-model="form.text"
             rows="6"
-            placeholder="Paste recruiter content here"
+            placeholder="Paste the message you received"
+            maxlength="6000"
+            spellcheck="false"
           />
+          <p class="textarea-counter">{{ form.text.length }}/6000 chars</p>
         </div>
 
         <div v-if="inputType === 'link'" class="input-card">
@@ -274,17 +664,32 @@ watch(
             v-model="form.link"
             type="url"
             placeholder="https://example.com/job-offer"
+            maxlength="2048"
+            spellcheck="false"
           />
+          <p class="field-helper">Allowed: public http/https URLs only.</p>
         </div>
 
         <div v-if="inputType === 'pdf'" class="input-card input-card--pdf">
           <label for="pdfInput">Upload PDF file</label>
-          <input id="pdfInput" type="file" accept=".pdf,application/pdf" @change="onFileChange" />
-          <p v-if="form.pdfFile" class="small-note">Selected: {{ form.pdfFile.name }}</p>
+          <input
+            id="pdfInput"
+            ref="pdfInputRef"
+            type="file"
+            accept=".pdf,application/pdf"
+            @change="onFileChange"
+          />
+          <div v-if="form.pdfFile" class="pdf-actions">
+            <p class="small-note">Selected: {{ form.pdfFile.name }}</p>
+            <button type="button" class="pdf-clear-btn" @click="clearSelectedPdf">
+              Remove selected PDF
+            </button>
+          </div>
           <p class="small-note">
             PDF text extraction tries the backend PyMuPDF endpoint first, then falls back to local
             reading.
           </p>
+          <p class="small-note">Max size: 8MB. Encrypted PDFs may fail to parse.</p>
         </div>
 
         <section class="quick-controls" aria-label="Sample inputs and recent checks">
@@ -296,7 +701,9 @@ watch(
             @click="isQuickControlsOpen = !isQuickControlsOpen"
           >
             <span>Quick controls</span>
-            <span class="quick-controls__toggle-text">{{ isQuickControlsOpen ? 'Hide' : 'Show' }}</span>
+            <span class="quick-controls__toggle-text">{{
+              isQuickControlsOpen ? 'Hide' : 'Show'
+            }}</span>
           </button>
 
           <div v-if="isQuickControlsOpen" id="quick-controls-panel" class="quick-controls__panel">
@@ -310,11 +717,7 @@ watch(
               <button type="button" class="assist-btn" @click="applySampleInput('high')">
                 High sample
               </button>
-              <button
-                type="button"
-                class="assist-btn assist-btn--muted"
-                @click="clearCurrentInput"
-              >
+              <button type="button" class="assist-btn assist-btn--muted" @click="clearCurrentInput">
                 Clear
               </button>
             </div>
@@ -340,9 +743,22 @@ watch(
           bank credentials, identity numbers, or private account secrets.
         </p>
 
-        <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
+        <p v-if="errorMessage" class="error-text" role="alert" aria-live="assertive">
+          {{ errorMessage }}
+        </p>
 
-        <button type="button" class="analyze-btn" @click="submitForAnalysis">Analyze now</button>
+        <button
+          type="button"
+          class="analyze-btn"
+          :disabled="isAnalyzing"
+          @click="submitForAnalysis"
+        >
+          <span v-if="isAnalyzing" class="analyze-btn__loading">
+            <span class="analyze-btn__spinner" aria-hidden="true"></span>
+            <span>Scanning...</span>
+          </span>
+          <span v-else>Analyze now</span>
+        </button>
       </div>
     </div>
   </section>
@@ -356,23 +772,28 @@ watch(
 }
 
 .submission-panel {
-  background: var(--ms-color-surface-page-start);
-  padding: 18px;
+  background: transparent;
+  padding: 0;
 }
 
 .submission-head {
   align-items: center;
-  background: var(--ms-color-surface-subtle);
+  background: #ffffff;
+  border: 1px solid #e5e2dc;
+  border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(26, 26, 42, 0.06);
   display: grid;
   gap: 12px;
   grid-template-columns: 76px minmax(0, 1fr);
-  margin-bottom: 12px;
+  margin-bottom: 14px;
   padding: 16px;
 }
 
 .head-inset {
   align-items: center;
-  background: var(--ms-color-surface-page-mid);
+  background: #fef2f2;
+  border: 1px solid #e5e2dc;
+  border-radius: 12px;
   display: flex;
   height: 76px;
   justify-content: center;
@@ -385,23 +806,35 @@ watch(
 }
 
 .head-kicker {
-  color: var(--ms-color-brand-hover);
+  color: #6b7280;
   font-size: 0.8rem;
-  font-weight: 500;
+  font-weight: 700;
   letter-spacing: 0.08em;
   margin: 0 0 12px;
   text-transform: uppercase;
 }
 
 h2 {
-  font-size: clamp(2rem, 4vw, 3.1rem);
-  font-weight: 300;
-  line-height: 0.95;
+  border-left: 3px solid #d0312d;
+  color: #1f2d6b;
+  font-size: clamp(1.8rem, 3.5vw, 2.6rem);
+  font-weight: 800;
+  line-height: 1.08;
   margin: 0 0 12px;
+  padding-left: 12px;
+}
+
+h2::after {
+  background: #d0312d;
+  content: '';
+  display: block;
+  height: 3px;
+  margin-top: 8px;
+  width: 40px;
 }
 
 .head-summary {
-  color: var(--ms-color-text-secondary);
+  color: #6b7280;
   line-height: 1.55;
   margin: 0;
   max-width: 760px;
@@ -411,11 +844,14 @@ h2 {
   align-items: start;
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(240px, 0.68fr) minmax(0, 1.32fr);
+  grid-template-columns: minmax(220px, 0.56fr) minmax(0, 1.44fr);
 }
 
 .mode-rail {
-  background: var(--ms-color-surface-page-mid);
+  background: #ffffff;
+  border: 1px solid #e5e2dc;
+  border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(26, 26, 42, 0.06);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -423,34 +859,37 @@ h2 {
 }
 
 .mode-hint {
-  color: var(--ms-color-text-secondary);
+  color: #6b7280;
   font-size: 0.76rem;
   line-height: 1.45;
   margin: 0 0 2px;
 }
 
 .mode-button {
-  background: var(--ms-color-surface-page-start);
-  border: 0;
-  color: var(--ms-color-text-primary);
+  background: #f9f7f4;
+  border: 1px solid #e5e2dc;
+  border-radius: 8px;
+  color: #1f2d6b;
   cursor: pointer;
   font-size: 0.96rem;
-  font-weight: 500;
+  font-weight: 600;
   min-height: 48px;
   padding: 12px 14px;
   text-align: left;
-  transition: background-color 0.2s ease;
+  transition: all 0.2s ease;
 }
 
 .mode-button--active {
-  background: var(--ms-color-brand);
-  color: rgb(255, 255, 255);
+  background: #1f2d6b;
+  border-color: #1f2d6b;
+  border-left: 3px solid #d0312d;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.14);
+  color: #ffffff;
 }
 
 .mode-button:hover,
 .mode-button:focus-visible {
-  background: var(--ms-color-brand-hover);
-  color: rgb(255, 255, 255);
+  border-color: #d0312d;
 }
 
 .rail-assist-actions {
@@ -461,9 +900,10 @@ h2 {
 }
 
 .assist-btn {
-  background: rgb(26, 25, 24);
-  border: 0;
-  color: rgb(255, 255, 255);
+  background: #f9f7f4;
+  border: 1px solid #e5e2dc;
+  border-radius: 8px;
+  color: #1f2d6b;
   cursor: pointer;
   font-size: 0.78rem;
   font-weight: 500;
@@ -473,37 +913,209 @@ h2 {
 
 .assist-btn:hover,
 .assist-btn:focus-visible {
-  background: rgb(46, 44, 43);
+  border-color: #d0312d;
+  color: #d0312d;
 }
 
 .assist-btn--muted {
-  background: rgb(84, 83, 82);
+  background: #fef2f2;
+  border-color: #d0312d;
+  color: #d0312d;
 }
 
 .mode-field {
-  background: var(--ms-color-surface-page-start);
+  background: #ffffff;
+  border: 1px solid #e5e2dc;
+  border-radius: 10px;
   margin-top: 8px;
   padding: 16px;
+  transition:
+    border-color 0.22s ease,
+    box-shadow 0.22s ease;
+}
+
+.mode-field:hover {
+  border-color: #1f2d6b;
+  box-shadow: 0 10px 20px rgba(44, 62, 140, 0.16);
+}
+
+.field-helper {
+  color: #6b7280;
+  font-size: 0.76rem;
+  margin: 8px 0 0;
+}
+
+.abn-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.abn-preview {
+  margin-top: 10px;
+}
+
+.abn-preview__title {
+  color: #6b7280;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.abn-preview__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.abn-preview-chip {
+  background: #f9f7f4;
+  border: 1px solid #e5e2dc;
+  border-radius: 999px;
+  color: #1f2d6b;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  min-height: 30px;
+  padding: 4px 12px;
+}
+
+.abn-preview-chip:hover,
+.abn-preview-chip:focus-visible {
+  border-color: #d0312d;
+  color: #d0312d;
+}
+
+.abn-preview-chip--active {
+  background: #1f2d6b;
+  border-color: #1f2d6b;
+  color: #ffffff;
+}
+
+.abn-search-btn,
+.abn-reset-btn,
+.abn-confirm-btn {
+  background: #f9f7f4;
+  border: 1px solid #e5e2dc;
+  border-radius: 8px;
+  color: #1f2d6b;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  min-height: 34px;
+  padding: 7px 12px;
+}
+
+.abn-search-btn {
+  background: #1f2d6b;
+  border-color: #1f2d6b;
+  color: #ffffff;
+}
+
+.abn-search-btn:hover,
+.abn-search-btn:focus-visible {
+  background: #1f2d6b;
+}
+
+.abn-search-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
+.abn-reset-btn:hover,
+.abn-reset-btn:focus-visible,
+.abn-confirm-btn:hover,
+.abn-confirm-btn:focus-visible {
+  border-color: #d0312d;
+  color: #d0312d;
+}
+
+.abn-note {
+  color: #6b7280;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  margin: 8px 0 0;
+}
+
+.abn-note--error {
+  color: #d0312d;
+}
+
+.abn-results {
+  border-top: 1px solid #e5e2dc;
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.abn-results__title {
+  color: #6b7280;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.abn-result-card {
+  background: #f9f7f4;
+  border: 1px solid #e5e2dc;
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+}
+
+.abn-result-card--selected {
+  border-color: #1f2d6b;
+  box-shadow: 0 0 0 2px rgba(31, 45, 107, 0.18);
+}
+
+.abn-result-card__name {
+  color: #1f2d6b;
+  font-size: 0.84rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.abn-result-card__meta {
+  color: #6b7280;
+  font-size: 0.76rem;
+  margin: 0;
 }
 
 .recent-checks {
-  background: var(--ms-color-surface-page-start);
+  background: #ffffff;
+  border: 1px solid #e5e2dc;
+  border-radius: 10px;
   margin-top: 8px;
   padding: 12px;
 }
 
 .quick-controls {
-  background: var(--ms-color-surface-page-mid);
-  border-top: 1px solid rgba(26, 25, 24, 0.12);
+  background: #ffffff;
+  border: 1px solid #e5e2dc;
+  border-radius: 10px;
   margin-top: 2px;
   padding: 12px;
+  transition:
+    border-color 0.22s ease,
+    box-shadow 0.22s ease;
+}
+
+.quick-controls:hover {
+  border-color: #1f2d6b;
+  box-shadow: 0 8px 18px rgba(44, 62, 140, 0.14);
 }
 
 .quick-controls__toggle {
   align-items: center;
   background: transparent;
   border: 0;
-  color: var(--ms-color-text-primary);
+  color: #1f2d6b;
   cursor: pointer;
   display: flex;
   font-size: 0.78rem;
@@ -516,7 +1128,7 @@ h2 {
 }
 
 .quick-controls__toggle-text {
-  color: var(--ms-color-brand-hover);
+  color: #d0312d;
   font-size: 0.72rem;
   font-weight: 600;
 }
@@ -526,7 +1138,7 @@ h2 {
 }
 
 .recent-checks__title {
-  color: var(--ms-color-text-secondary);
+  color: #6b7280;
   font-size: 0.76rem;
   font-weight: 600;
   letter-spacing: 0.07em;
@@ -535,9 +1147,10 @@ h2 {
 }
 
 .recent-check-btn {
-  background: var(--ms-color-surface-subtle);
-  border: 0;
-  color: var(--ms-color-text-primary);
+  background: #f9f7f4;
+  border: 1px solid #e5e2dc;
+  border-radius: 8px;
+  color: #1f2d6b;
   cursor: pointer;
   display: block;
   font-size: 0.8rem;
@@ -557,11 +1170,11 @@ h2 {
 
 .recent-check-btn:hover,
 .recent-check-btn:focus-visible {
-  background: var(--ms-color-border-soft);
+  border-color: #d0312d;
 }
 
 .mode-input-row {
-  color: var(--ms-color-text-secondary);
+  color: #6b7280;
   display: block;
   font-size: 0.84rem;
   font-weight: 500;
@@ -580,19 +1193,46 @@ h2 {
 }
 
 .compose-pane {
-  background: var(--ms-color-surface-page-start);
+  background: #ffffff;
+  border: 1px solid #e5e2dc;
+  border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(26, 26, 42, 0.06);
   display: grid;
   gap: 10px;
+  min-width: 0;
+  overflow: hidden;
   padding: 18px;
+  position: relative;
+  transition:
+    border-color 0.22s ease,
+    box-shadow 0.22s ease;
+}
+
+.compose-pane--scanning::after {
+  animation: scanSweepPanel 800ms linear both;
+  background: linear-gradient(90deg, transparent, #d0312d, transparent);
+  content: '';
+  height: 2px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+.compose-pane:hover {
+  border-color: #1f2d6b;
+  box-shadow: 0 12px 24px rgba(44, 62, 140, 0.18);
 }
 
 .compose-head {
   align-items: baseline;
   display: flex;
+  gap: 8px;
   justify-content: space-between;
 }
 
 .compose-head p {
+  color: #6b7280;
   font-size: 0.78rem;
   font-weight: 500;
   letter-spacing: 0.08em;
@@ -601,44 +1241,66 @@ h2 {
 }
 
 .compose-head__mode {
-  color: var(--ms-color-brand-hover);
+  color: #d0312d;
 }
 
 .input-card {
-  background: var(--ms-color-surface-subtle);
+  background: #ffffff;
+  border: 1px solid #e5e2dc;
+  border-radius: 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-height: 150px;
   padding: 18px;
+  transition:
+    border-color 0.22s ease,
+    box-shadow 0.22s ease;
+}
+
+.input-card:hover {
+  border-color: #1f2d6b;
+  box-shadow: 0 8px 18px rgba(44, 62, 140, 0.14);
 }
 
 label {
-  color: var(--ms-color-text-secondary);
+  color: #6b7280;
   font-size: 0.86rem;
   font-weight: 500;
 }
 
 input,
 textarea {
-  background: var(--ms-color-surface-page-start);
+  background: #ffffff;
+  border: 1px solid #e5e2dc;
+  border-radius: 6px;
   box-sizing: border-box;
-  color: var(--ms-color-text-primary);
+  color: #1f2d6b;
   min-height: 44px;
   width: 100%;
   padding: 12px 14px;
+}
+
+textarea {
+  border: 1px solid #e5e2dc;
+  min-height: 170px;
 }
 
 input:hover,
 textarea:hover,
 input:focus,
 textarea:focus {
-  outline: 2px solid var(--ms-color-brand);
-  outline-offset: 0;
+  border-color: #d0312d;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.14);
+  outline: none;
 }
 
-textarea {
-  min-height: 170px;
+.textarea-counter {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 500;
+  margin: 0;
+  text-align: right;
 }
 
 .input-card--pdf {
@@ -646,14 +1308,41 @@ textarea {
 }
 
 .small-note {
-  color: var(--ms-color-text-tertiary);
+  color: #6b7280;
   font-size: 0.88rem;
   margin: 0;
 }
 
+.pdf-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pdf-clear-btn {
+  background: #f9f7f4;
+  border: 1px solid #e5e2dc;
+  border-radius: 8px;
+  color: #1f2d6b;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  min-height: 32px;
+  padding: 6px 10px;
+}
+
+.pdf-clear-btn:hover,
+.pdf-clear-btn:focus-visible {
+  border-color: #d0312d;
+  color: #d0312d;
+}
+
 .privacy-note {
-  background: var(--ms-color-surface-page-mid);
-  color: var(--ms-color-text-secondary);
+  background: #f9f7f4;
+  border: 1px solid #e5e2dc;
+  border-radius: 8px;
+  color: #6b7280;
   font-size: 0.74rem;
   letter-spacing: 0.01em;
   line-height: 1.6;
@@ -662,38 +1351,81 @@ textarea {
 }
 
 .error-text {
-  background: var(--ms-color-danger-soft);
-  color: var(--ms-color-danger);
+  background: rgba(220, 38, 38, 0.12);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  border-radius: 8px;
+  color: #d0312d;
   margin: 0;
   padding: 20px;
 }
 
 .analyze-btn {
-  background: var(--ms-color-brand);
+  background: #1f2d6b;
   border: 0;
-  color: rgb(255, 255, 255);
+  border-radius: 10px;
+  color: #ffffff;
   cursor: pointer;
-  display: inline-flex;
-  font-size: 1.02rem;
-  font-weight: 600;
+  display: inline-grid;
+  font-size: 1rem;
+  font-weight: 700;
   justify-content: center;
-  min-height: 48px;
-  min-width: 260px;
+  align-items: center;
+  height: 52px;
+  width: 100%;
   padding: 14px 28px;
-  text-transform: uppercase;
+  text-transform: none;
   transition: background-color 0.2s ease;
 }
 
 .analyze-btn:hover,
 .analyze-btn:focus-visible {
-  background: var(--ms-color-brand-hover);
+  background: #1f2d6b;
+  box-shadow: 0 10px 20px rgba(44, 62, 140, 0.28);
+  transform: translateY(-2px);
 }
 
 .analyze-btn:active {
-  background: var(--ms-color-brand-active);
+  background: #1f2d6b;
 }
 
-@media (max-width: 920px) {
+.analyze-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.9;
+}
+
+.analyze-btn__loading {
+  align-items: center;
+  display: inline-flex;
+  gap: 10px;
+}
+
+.analyze-btn__spinner {
+  animation: spin 0.9s linear infinite;
+  border: 2px solid rgba(255, 255, 255, 0.32);
+  border-right-color: #ffffff;
+  border-radius: 50%;
+  display: inline-block;
+  height: 16px;
+  width: 16px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes scanSweepPanel {
+  from {
+    transform: translateY(0);
+  }
+
+  to {
+    transform: translateY(calc(100% - 2px));
+  }
+}
+
+@media (max-width: 1080px) {
   .editor-grid {
     grid-template-columns: 1fr;
   }
@@ -706,6 +1438,104 @@ textarea {
 
   .analyze-btn {
     width: 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  .mode-rail,
+  .compose-pane {
+    padding: 14px;
+  }
+
+  .mode-field,
+  .input-card,
+  .quick-controls,
+  .privacy-note {
+    padding: 12px;
+  }
+
+  .compose-head {
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: flex-start;
+  }
+
+  .compose-head p {
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+  }
+
+  .assist-btn,
+  .abn-preview-chip {
+    flex: 1 1 calc(50% - 8px);
+    min-width: 0;
+  }
+
+  .abn-actions {
+    flex-wrap: wrap;
+  }
+
+  .abn-search-btn,
+  .abn-reset-btn,
+  .abn-confirm-btn {
+    flex: 1 1 calc(50% - 8px);
+    min-width: 0;
+  }
+
+  .input-card textarea {
+    min-height: 132px;
+  }
+}
+
+@media (max-width: 420px) {
+  .submission-head,
+  .mode-rail,
+  .compose-pane {
+    border-radius: 8px;
+    padding: 10px;
+  }
+
+  .head-inset {
+    height: 60px;
+    width: 60px;
+  }
+
+  .head-inset img {
+    height: 30px;
+    width: 30px;
+  }
+
+  .input-card,
+  .quick-controls,
+  .privacy-note,
+  .mode-field {
+    border-radius: 8px;
+    padding: 10px;
+  }
+
+  .assist-btn,
+  .abn-search-btn,
+  .abn-reset-btn,
+  .abn-confirm-btn {
+    font-size: 0.72rem;
+    min-height: 34px;
+    padding: 6px 8px;
+  }
+
+  input,
+  textarea {
+    min-height: 40px;
+    padding: 10px;
+  }
+
+  .input-card textarea {
+    min-height: 116px;
+  }
+
+  .analyze-btn {
+    font-size: 0.9rem;
+    height: 46px;
+    padding: 10px 14px;
   }
 }
 </style>

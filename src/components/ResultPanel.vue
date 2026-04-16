@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 const props = defineProps({
   result: {
@@ -14,92 +14,402 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  analysisSourceText: {
+    type: String,
+    default: '',
+  },
 })
+
+const animatedScore = ref(0)
+let scoreAnimationFrame = null
+const isTierTransitioning = ref(false)
+let tierTransitionTimer = null
+
+const scoreArcPath = 'M8 114 A106 106 0 0 1 232 114'
+
+const TIER = {
+  CRITICAL: 'critical',
+  HIGH: 'high',
+  MEDIUM: 'medium',
+  LOW: 'low',
+}
+
+const RISK_TIER_CONFIG_BY_TIER = {
+  [TIER.CRITICAL]: { label: 'Critical risk' },
+  [TIER.HIGH]: { label: 'High risk' },
+  [TIER.MEDIUM]: { label: 'Medium risk' },
+  [TIER.LOW]: { label: 'Low risk' },
+}
+
+const SCORE_ARC_COLOR_BY_TIER = {
+  [TIER.CRITICAL]: '#D0312D',
+  [TIER.HIGH]: '#D0312D',
+  [TIER.MEDIUM]: '#B45309',
+  [TIER.LOW]: '#1F2D6B',
+}
+
+const SIDE_RISK_LABEL_BY_TIER = {
+  [TIER.CRITICAL]: 'HIGH RISK',
+  [TIER.HIGH]: 'HIGH RISK',
+  [TIER.MEDIUM]: 'MEDIUM RISK',
+  [TIER.LOW]: 'LOW RISK',
+}
+
+const SIDE_RISK_CLASS_BY_TIER = {
+  [TIER.CRITICAL]: 'side-risk--critical',
+  [TIER.HIGH]: 'side-risk--critical',
+  [TIER.MEDIUM]: 'side-risk--medium',
+  [TIER.LOW]: 'side-risk--low',
+}
+
+const CONCERN_LABEL_BY_TIER = {
+  [TIER.CRITICAL]: 'Severe concern',
+  [TIER.HIGH]: 'Severe concern',
+  [TIER.MEDIUM]: 'Moderate concern',
+  [TIER.LOW]: 'Low concern',
+}
+
+const RECOMMENDED_ACTION_BY_TIER = {
+  [TIER.CRITICAL]:
+    "Stop here, don't pay anything, and verify the business through official channels.",
+  [TIER.HIGH]: "Stop here, don't pay anything, and verify the business through official channels.",
+  [TIER.MEDIUM]: 'Pause now and verify this recruiter before you reply.',
+  [TIER.LOW]: 'Continue carefully and keep verifying key details before sharing any data.',
+}
+
+const WARNING_DEFAULT_ADVICE =
+  'This signal pattern appears in scam scripts and should be verified before replying.'
+
+const WARNING_ADVICE_RULES = [
+  {
+    keywords: ['payment', 'deposit'],
+    advice: 'Upfront payment requests are a common extraction tactic before contact disappears.',
+  },
+  {
+    keywords: ['urgent', 'pressure'],
+    advice: 'Scammers create artificial deadlines to block normal verification.',
+  },
+  {
+    keywords: ['task-based'],
+    advice: 'Task-reward loops can normalize repeated top-ups before withdrawal is blocked.',
+  },
+  {
+    keywords: ['sensitive', 'identity', 'bank'],
+    advice: 'Identity or banking requests can be used for account takeover and fraud.',
+  },
+  {
+    keywords: ['unrealistic', 'easy income'],
+    advice: 'Overstated low-effort earnings are often used to trigger fast decisions.',
+  },
+]
+
+const WARNING_SEVERITY_META = {
+  high: { badge: 'CRITICAL', color: '#D0312D' },
+  medium: { badge: 'MEDIUM', color: '#B45309' },
+  low: { badge: 'LOW', color: '#1F2D6B' },
+}
+
+function normalizeRiskTier(rawTier) {
+  if (rawTier === TIER.CRITICAL) return TIER.CRITICAL
+  if (rawTier === TIER.HIGH) return TIER.HIGH
+  if (rawTier === TIER.MEDIUM) return TIER.MEDIUM
+  return ''
+}
+
+function resolveRiskTierByScore(score) {
+  if (score >= 80) return TIER.CRITICAL
+  if (score >= 60) return TIER.HIGH
+  if (score >= 40) return TIER.MEDIUM
+  return TIER.LOW
+}
+
+function resolveWarningAdvice(normalizedLabel) {
+  const matchedRule = WARNING_ADVICE_RULES.find((rule) =>
+    rule.keywords.some((keyword) => normalizedLabel.includes(keyword)),
+  )
+  return matchedRule?.advice ?? WARNING_DEFAULT_ADVICE
+}
+
+function resolveWarningSeverityMeta(severity) {
+  if (severity === 'high') return WARNING_SEVERITY_META.high
+  if (severity === 'medium') return WARNING_SEVERITY_META.medium
+  return WARNING_SEVERITY_META.low
+}
 
 const riskPercent = computed(() => {
   const raw = Number(props.result?.riskScore ?? 0)
   return Math.max(0, Math.min(100, Math.round(raw)))
 })
 
-const normalizedTier = computed(() => {
-  const score = riskPercent.value
-  if (score >= 80) return 'critical'
-  if (score >= 60) return 'high'
-  if (score >= 40) return 'medium'
-  return 'low'
+const backendRiskTier = computed(() => {
+  const rawTier = String(props.result?.riskTier ?? '')
+    .trim()
+    .toLowerCase()
+  return normalizeRiskTier(rawTier) || resolveRiskTierByScore(riskPercent.value)
 })
 
-const riskColor = computed(() => {
-  if (normalizedTier.value === 'low') return 'rgb(6, 119, 59)'
-  if (normalizedTier.value === 'medium') return 'rgb(245, 199, 44)'
-  return 'rgb(188, 29, 12)'
+const riskTierConfig = computed(() => {
+  return RISK_TIER_CONFIG_BY_TIER[backendRiskTier.value] ?? RISK_TIER_CONFIG_BY_TIER[TIER.LOW]
 })
 
-const riskTierLabel = computed(() => {
-  if (normalizedTier.value === 'critical') return 'Critical'
-  if (normalizedTier.value === 'high') return 'High'
-  if (normalizedTier.value === 'medium') return 'Medium'
-  return 'Low'
+const scoreArcColor = computed(() => {
+  return SCORE_ARC_COLOR_BY_TIER[backendRiskTier.value] ?? SCORE_ARC_COLOR_BY_TIER[TIER.LOW]
 })
 
-const binaryStatusLabel = computed(() => {
-  return props.result?.suspicious ? 'Suspicious' : 'Not suspicious'
-})
-
-const binaryStatusNote = computed(() => {
-  if (props.result?.suspicious) {
-    return 'This message has clear scam warning signs.'
+const isSuspicious = computed(() => {
+  if (typeof props.result?.suspicious === 'boolean') {
+    return props.result.suspicious
   }
-  return 'This message has no clear scam warning signs right now.'
+  return riskPercent.value >= 40
 })
 
-const evidenceStrength = computed(() => {
+const binaryStatusLabel = computed(() => (isSuspicious.value ? 'Suspicious' : 'Not suspicious'))
+const scamType = computed(() => String(props.result?.scamType ?? 'unknown or unclear').trim())
+const isScamTypeUnknown = computed(() => scamType.value.toLowerCase() === 'unknown or unclear')
+
+const readableScamType = computed(() => {
+  if (isScamTypeUnknown.value) return 'Unknown type'
+
+  return scamType.value
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+})
+
+const warningRows = computed(() => {
   const factors = Array.isArray(props.result?.factors) ? props.result.factors : []
+
+  return factors.slice(0, 6).map((factor) => {
+    const severity = String(factor?.severity ?? 'low').toLowerCase()
+    const label = String(factor?.label ?? 'Risk signal')
+    const normalizedLabel = label.toLowerCase()
+    const severityMeta = resolveWarningSeverityMeta(severity)
+    return {
+      label,
+      badge: severityMeta.badge,
+      color: severityMeta.color,
+      advice: resolveWarningAdvice(normalizedLabel),
+    }
+  })
+})
+
+const indicatorList = computed(() => {
   const indicators = Array.isArray(props.result?.indicators) ? props.result.indicators : []
+  return indicators
+    .slice(0, 6)
+    .map((item) => String(item).trim())
+    .filter(Boolean)
+})
 
-  const highCount = factors.filter((factor) => String(factor?.severity).toLowerCase() === 'high').length
-  const mediumCount = factors.filter(
-    (factor) => String(factor?.severity).toLowerCase() === 'medium',
-  ).length
+const warningSignalCount = computed(() =>
+  Math.max(indicatorList.value.length, warningRows.value.length),
+)
 
-  if (!highCount && !mediumCount && indicators.length) {
-    return `${indicators.length} medium signal${indicators.length > 1 ? 's' : ''}`
+const heroHeadline = computed(() => {
+  if (backendRiskTier.value === 'critical') return 'High chance this is a scam'
+  if (backendRiskTier.value === 'high') return 'Many warning signs were found'
+  if (backendRiskTier.value === 'medium') return 'Some signs look suspicious'
+  return 'No strong scam signs detected'
+})
+
+const heroSubline = computed(() => {
+  const signalUnit = warningSignalCount.value === 1 ? 'signal' : 'signals'
+  const typeText = isScamTypeUnknown.value
+    ? 'Scam type unclear'
+    : `Scam type ${readableScamType.value}`
+  return `${warningSignalCount.value} ${signalUnit} detected · ${typeText}`
+})
+
+const matchedPhraseRecords = computed(() => {
+  const rows = Array.isArray(props.result?.matchedPhrases) ? props.result.matchedPhrases : []
+  const unique = new Map()
+
+  rows.forEach((row) => {
+    const phrase = typeof row === 'string' ? row.trim() : String(row?.phrase ?? '').trim()
+    if (!phrase) return
+
+    const label = typeof row === 'string' ? '' : String(row?.label ?? '').trim()
+    const key = phrase.toLowerCase()
+    if (!unique.has(key)) {
+      unique.set(key, { phrase, label })
+    }
+  })
+
+  return Array.from(unique.values()).slice(0, 8)
+})
+
+const messageExcerpt = computed(() => {
+  const excerpt = String(props.result?.analysisExcerpt ?? '').trim()
+  if (excerpt) return excerpt
+
+  const source = String(props.analysisSourceText ?? '').trim()
+  if (!source) return ''
+
+  if (source.length <= 420) return source
+  return `${source.slice(0, 420)}...`
+})
+
+const highlightedExcerpt = computed(() => {
+  const text = messageExcerpt.value
+  if (!text) return ''
+
+  const escapeHtml = (value) =>
+    value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+  const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+  const escaped = escapeHtml(text)
+  if (!matchedPhraseRecords.value.length) return escaped
+
+  const encoded = matchedPhraseRecords.value
+    .map((item) => ({ phrase: escapeHtml(item.phrase), label: item.label }))
+    .sort((a, b) => b.phrase.length - a.phrase.length)
+
+  const labelByPhrase = new Map(encoded.map((item) => [item.phrase.toLowerCase(), item.label]))
+  const pattern = new RegExp(
+    `(${encoded.map((item) => escapeRegExp(item.phrase)).join('|')})`,
+    'gi',
+  )
+
+  return escaped.replace(pattern, (match) => {
+    const label = labelByPhrase.get(match.toLowerCase()) || ''
+    if (!label) {
+      return `<span class="flag-highlight">${match}</span>`
+    }
+
+    const encodedLabel = escapeHtml(label)
+    return `<span class="flag-highlight" title="${encodedLabel}" aria-label="${encodedLabel}">${match}</span>`
+  })
+})
+
+const reasonParagraphs = computed(() => {
+  const explanation = Array.isArray(props.result?.explanation) ? props.result.explanation : []
+  const clean = explanation.map((item) => String(item).trim()).filter(Boolean)
+  if (clean.length > 1) return clean.slice(1, 3)
+  if (clean.length === 1) return clean
+  return ['Risk scoring is based on matched warning signals and pattern confidence.']
+})
+
+const sideRiskLabel = computed(() => {
+  return SIDE_RISK_LABEL_BY_TIER[backendRiskTier.value] ?? SIDE_RISK_LABEL_BY_TIER[TIER.LOW]
+})
+
+const sideRiskClass = computed(() => {
+  return SIDE_RISK_CLASS_BY_TIER[backendRiskTier.value] ?? SIDE_RISK_CLASS_BY_TIER[TIER.LOW]
+})
+
+const concernLabel = computed(() => {
+  return CONCERN_LABEL_BY_TIER[backendRiskTier.value] ?? CONCERN_LABEL_BY_TIER[TIER.LOW]
+})
+
+const scoreBandLabel = computed(() => `${animatedScore.value} · ${concernLabel.value}`)
+
+const recommendedAction = computed(() => {
+  return RECOMMENDED_ACTION_BY_TIER[backendRiskTier.value] ?? RECOMMENDED_ACTION_BY_TIER[TIER.LOW]
+})
+
+const arcDashOffset = computed(() => {
+  const normalized = Math.max(0, Math.min(100, animatedScore.value))
+  return 100 - normalized
+})
+
+const scamTypeConfidence = computed(() => {
+  const candidates = [
+    props.result?.scamTypeConfidence,
+    props.result?.classificationConfidence,
+    props.result?.confidence,
+  ]
+
+  for (const value of candidates) {
+    const numeric = Number(value)
+    if (!Number.isFinite(numeric)) continue
+    if (numeric > 0 && numeric <= 1) return clamp(Math.round(numeric * 100), 1, 100)
+    if (numeric > 1 && numeric <= 100) return clamp(Math.round(numeric), 1, 100)
   }
 
-  return `${highCount} high / ${mediumCount} medium signals`
+  const base = isScamTypeUnknown.value ? 30 : 46
+  const signalBoost = Math.min(26, warningSignalCount.value * 5)
+  const scoreBoost = Math.round(riskPercent.value * 0.2)
+  return clamp(base + signalBoost + scoreBoost, 15, 96)
 })
 
-const recommendedActionLevel = computed(() => {
-  if (normalizedTier.value === 'critical') return 'Stop payment immediately and verify identity now'
-  if (normalizedTier.value === 'high') return 'Stop payment and verify identity before any next step'
-  if (normalizedTier.value === 'medium') return 'Verify identity before any transfer'
-  return 'Proceed carefully and continue monitoring'
-})
+const scamTypeConfidenceLine = computed(
+  () => `${readableScamType.value} · ${scamTypeConfidence.value}% confidence`,
+)
 
-const analysisIntroLine = computed(() => {
-  return `${riskTierLabel.value} risk (${riskPercent.value}/100). ${recommendedActionLevel.value}.`
-})
+const scamTypeConfidenceHint = computed(
+  () => 'Confidence is estimated from signal consistency and phrase overlap in this submission.',
+)
 
-const confidencePercent = computed(() => {
-  return Number(props.result?.classificationConfidence ?? 0) * 100
-})
-
-const thresholdPercent = computed(() => {
-  return Number(props.result?.classificationConfidenceThreshold ?? 0) * 100
-})
-
-function severityLabel(severity) {
-  const level = String(severity ?? '').toLowerCase()
-  if (level === 'high') return 'Strong warning sign'
-  if (level === 'medium') return 'Moderate warning sign'
-  if (level === 'low') return 'Minor warning sign'
-  return 'Warning sign'
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value))
 }
 
+function easeOut(progress) {
+  return 1 - (1 - progress) ** 3
+}
+
+function animateRiskScore(target) {
+  if (scoreAnimationFrame) {
+    cancelAnimationFrame(scoreAnimationFrame)
+  }
+
+  const duration = 1000
+  const start = performance.now()
+
+  const run = (time) => {
+    const progress = Math.min((time - start) / duration, 1)
+    animatedScore.value = Math.round(target * easeOut(progress))
+
+    if (progress < 1) {
+      scoreAnimationFrame = requestAnimationFrame(run)
+      return
+    }
+
+    scoreAnimationFrame = null
+  }
+
+  animatedScore.value = 0
+  scoreAnimationFrame = requestAnimationFrame(run)
+}
+
+watch(
+  riskPercent,
+  (value) => {
+    animateRiskScore(value)
+  },
+  { immediate: true },
+)
+
+watch(
+  backendRiskTier,
+  () => {
+    isTierTransitioning.value = true
+    if (tierTransitionTimer) {
+      clearTimeout(tierTransitionTimer)
+    }
+    tierTransitionTimer = window.setTimeout(() => {
+      isTierTransitioning.value = false
+    }, 320)
+  },
+  { immediate: false },
+)
+
+onBeforeUnmount(() => {
+  if (scoreAnimationFrame) {
+    cancelAnimationFrame(scoreAnimationFrame)
+  }
+
+  if (tierTransitionTimer) {
+    clearTimeout(tierTransitionTimer)
+  }
+})
+
 const nextActions = [
-  { label: 'View scam progression', href: '#learn-section' },
-  { label: 'Verify recruiter details', href: '#recruiterName' },
-  { label: 'See trend insights', href: '#insights-section' },
+  { label: 'Learn', href: '#learn-section' },
+  { label: 'Insights', href: '#insights-section' },
+  { label: 'Support', href: '#support-section' },
 ]
 </script>
 
@@ -107,461 +417,599 @@ const nextActions = [
   <section
     class="result-panel"
     :class="{ 'result-panel--focus': highlightKeySignals }"
-    aria-label="Result panel"
+    :style="{
+      '--arc-color': scoreArcColor,
+    }"
+    aria-label="Check alerts result"
   >
-    <div class="result-split">
-      <aside class="score-sidebar" aria-label="Risk score block">
-        <div class="score-chip" aria-hidden="true"></div>
-        <p class="status-kicker">Status</p>
-        <p class="status-value" role="status">{{ binaryStatusLabel }}</p>
-        <p class="status-note">{{ binaryStatusNote }}</p>
-
-        <p class="score-kicker">Risk score</p>
-        <p class="score-value">{{ riskPercent }}<span>%</span></p>
-        <p class="score-tier">{{ riskTierLabel }} risk, {{ riskPercent }}/100</p>
-
-        <div
-          class="score-gauge"
-          role="progressbar"
-          aria-label="Risk score gauge"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          :aria-valuenow="riskPercent"
-        >
-          <div
-            class="score-gauge__fill"
-            :style="{ width: `${riskPercent}%`, backgroundColor: riskColor }"
-          ></div>
-        </div>
-
-        <div class="score-stats">
-          <p><span>Scam type</span>{{ result.scamType }}</p>
-          <p><span>Warning signs found</span>{{ evidenceStrength }}</p>
-          <p><span>What to do now</span>{{ recommendedActionLevel }}</p>
-        </div>
-
-        <p class="score-tech">
-          How sure this result is: {{ confidencePercent.toFixed(0) }}%.
-        </p>
-      </aside>
-
+    <div class="result-layout">
       <div class="result-main">
-        <header class="result-head">
-          <h2 id="result-heading" tabindex="-1">Analysis Result</h2>
-          <p role="status">{{ analysisIntroLine }}</p>
+        <header class="analysis-hero" :class="{ 'analysis-hero--transition': isTierTransitioning }">
+          <div class="analysis-hero__meta">
+            <span
+              class="status-pill"
+              :class="isSuspicious ? 'status-pill--alert' : 'status-pill--safe'"
+            >
+              {{ binaryStatusLabel }}
+            </span>
+            <span class="tier-pill" :class="`tier-pill--${backendRiskTier}`">{{
+              riskTierConfig.label
+            }}</span>
+          </div>
+          <h2 id="result-heading" class="analysis-hero__title" tabindex="-1">{{ heroHeadline }}</h2>
+          <p class="analysis-hero__subtitle">{{ heroSubline }}</p>
         </header>
 
-        <div class="content-row">
-          <section class="content-card content-card--signal">
-            <div class="card-head">
-              <span class="card-inset card-inset--warn" aria-hidden="true">
-                <img src="https://img.icons8.com/cotton/64/mission-of-a-company--v2.png" alt="" />
-              </span>
-              <h3>Why this looks risky</h3>
-            </div>
-            <div v-if="result.indicators.length" class="detail-list">
-              <div
-                v-for="(item, index) in result.indicators"
-                :key="item"
-                class="detail-row"
-                :class="{ 'detail-row--highlight': highlightKeySignals && index < 2 }"
-              >
-                <span class="detail-token detail-token--warn" aria-hidden="true"></span>
-                <p>{{ item }}</p>
-              </div>
-            </div>
-            <p v-else class="plain-block">No major warning signs were found.</p>
-          </section>
+        <section class="reason-copy" aria-label="Risk explanation">
+          <p v-for="(paragraph, index) in reasonParagraphs" :key="`reason-${index}`">
+            {{ paragraph }}
+          </p>
+        </section>
 
-          <section class="content-card content-card--mid content-card--signal">
-            <div class="card-head">
-              <span class="card-inset card-inset--ok" aria-hidden="true">
-                <img src="https://img.icons8.com/cotton/64/checklist--v1.png" alt="" />
-              </span>
-              <h3>Warning signs by strength</h3>
-            </div>
-            <div v-if="result.factors.length" class="detail-list">
-              <div
-                v-for="(factor, index) in result.factors"
-                :key="factor.label"
-                class="detail-row"
-                :class="{ 'detail-row--highlight': highlightKeySignals && index < 2 }"
-              >
-                <span class="detail-token detail-token--ok" aria-hidden="true"></span>
-                <p>{{ factor.label }} · {{ severityLabel(factor.severity) }}</p>
-              </div>
-            </div>
-            <p v-else class="plain-block">No warning sign affected the score.</p>
-          </section>
-        </div>
+        <section class="evidence-block" aria-label="Evidence excerpt and highlights">
+          <p class="section-label">Message evidence</p>
+          <blockquote class="evidence-shell">
+            <p v-if="highlightedExcerpt" class="evidence-quote" v-html="highlightedExcerpt"></p>
+            <p v-else class="evidence-quote">No excerpt available for this submission.</p>
+          </blockquote>
+        </section>
 
-        <section class="actions-block" aria-label="More options">
-          <h3>Next actions</h3>
-          <div class="actions-grid">
-            <a
-              v-for="action in nextActions"
-              :key="action.label"
-              class="action-card"
-              :href="action.href"
+        <section
+          v-if="warningRows.length"
+          class="warning-grid-section"
+          aria-label="Warning signs list"
+        >
+          <p class="section-label">Warning signs we spotted</p>
+          <div class="warning-list">
+            <article
+              v-for="(item, index) in warningRows"
+              :key="`${item.label}-${index}`"
+              class="warning-item"
+              :style="{
+                '--warning-color': item.color,
+                '--warning-delay': `${index * 100}ms`,
+              }"
             >
-              <span>{{ action.label }}</span>
-              <span class="action-arrow" aria-hidden="true"></span>
-            </a>
+              <div class="warning-item__head">
+                <span class="warning-item__bar" aria-hidden="true"></span>
+                <div class="warning-item__copy">
+                  <h3 class="warning-item__title">{{ item.label }}</h3>
+                  <p class="warning-item__desc">{{ item.advice }}</p>
+                </div>
+              </div>
+            </article>
           </div>
         </section>
 
-        <details v-if="extractedTextPreview" class="extracted-preview" aria-label="Extracted text preview">
+        <nav class="next-links" aria-label="What to do next">
+          <a
+            v-for="(action, index) in nextActions"
+            :key="action.label"
+            :href="action.href"
+            class="next-links__item"
+          >
+            {{ action.label }}
+            <span v-if="index < nextActions.length - 1" aria-hidden="true">|</span>
+          </a>
+        </nav>
+
+        <details
+          v-if="extractedTextPreview"
+          class="extracted-preview"
+          aria-label="Extracted text preview"
+        >
           <summary>Extracted text preview</summary>
           <p>{{ extractedTextPreview }}</p>
         </details>
       </div>
+
+      <aside class="result-side">
+        <div class="side-panel" aria-label="Risk details sidebar">
+          <section class="side-section side-section--score" aria-label="Risk score dashboard">
+            <p class="side-block__title">Risk Score</p>
+
+            <div class="score-arc-wrap">
+              <svg class="score-arc" viewBox="0 0 240 132" role="presentation" aria-hidden="true">
+                <path class="score-arc__track" :d="scoreArcPath" pathLength="100"></path>
+                <path
+                  class="score-arc__progress"
+                  :d="scoreArcPath"
+                  pathLength="100"
+                  :stroke-dasharray="100"
+                  :stroke-dashoffset="arcDashOffset"
+                ></path>
+
+                <g class="score-svg__text" transform="translate(120 98)">
+                  <text class="score-svg__value" text-anchor="end">{{ animatedScore }}</text>
+                  <text class="score-svg__unit" x="8" y="-2" text-anchor="start">/100</text>
+                </g>
+              </svg>
+            </div>
+
+            <p class="side-score__band">{{ scoreBandLabel }}</p>
+            <span class="side-risk" :class="sideRiskClass">{{ sideRiskLabel }}</span>
+          </section>
+
+          <section class="side-section side-section--type" aria-label="Scam type confidence">
+            <p class="side-block__title">Scam Type</p>
+            <p class="scam-type-badge">{{ scamTypeConfidenceLine }}</p>
+            <p class="scam-type-note">{{ scamTypeConfidenceHint }}</p>
+          </section>
+
+          <section class="side-section side-section--action" aria-label="Priority action">
+            <p class="action-card__title">Priority Action</p>
+            <p class="action-card__text">{{ recommendedAction }}</p>
+          </section>
+        </div>
+      </aside>
     </div>
   </section>
 </template>
 
 <style scoped>
 .result-panel {
-  background: var(--ms-color-surface-page-start);
+  background: #f5f2ee;
+  border: 1px solid #d5d1ca;
+  border-top: 2px solid #d5d1ca;
+  padding: 0 0 20px;
 }
 
 .result-panel--focus {
-  box-shadow: inset 0 0 0 2px rgba(15, 82, 186, 0.35);
+  outline: 2px solid rgba(31, 45, 107, 0.2);
+  outline-offset: 6px;
 }
 
-.result-split {
+.result-layout {
   display: grid;
-  grid-template-columns: minmax(260px, 30%) minmax(0, 70%);
-  min-height: 100%;
-}
-
-.score-sidebar {
-  background: rgb(26, 25, 24);
-  color: rgb(255, 255, 255);
-  padding: 56px 48px;
-}
-
-.score-chip {
-  background: var(--ms-color-brand);
-  height: 18px;
-  margin-bottom: 16px;
-  width: 52px;
-}
-
-.score-kicker {
-  color: rgb(255, 255, 255);
-  font-size: 0.8rem;
-  font-weight: 500;
-  letter-spacing: 0.12em;
-  margin: 0 0 14px;
-  text-transform: uppercase;
-}
-
-.score-value {
-  color: rgb(255, 255, 255);
-  font-size: clamp(4rem, 8vw, 7rem);
-  font-weight: 300;
-  line-height: 0.9;
-  margin: 0 0 14px;
-}
-
-.score-value span {
-  font-size: 1.45rem;
-}
-
-.score-tier {
-  color: rgb(255, 255, 255);
-  font-size: 1.22rem;
-  margin: 0 0 22px;
-}
-
-.score-gauge {
-  background: rgba(255, 255, 255, 0.2);
-  height: 16px;
-  margin-bottom: 20px;
-  width: 100%;
-}
-
-.score-gauge__fill {
-  height: 100%;
-  transition: width 0.3s ease;
-}
-
-.score-stats {
-  display: grid;
-  gap: 14px;
-}
-
-.score-stats p {
-  margin: 0;
-}
-
-.score-stats span {
-  color: rgba(255, 255, 255, 0.74);
-  display: block;
-  font-size: 0.78rem;
-  letter-spacing: 0.08em;
-  margin-bottom: 2px;
-  text-transform: uppercase;
-}
-
-.score-tech {
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 0.78rem;
-  line-height: 1.5;
-  margin: 14px 0 0;
+  gap: 28px;
+  grid-template-columns: minmax(0, 11fr) minmax(300px, 9fr);
+  padding: 20px;
 }
 
 .result-main {
-  background: var(--ms-color-surface-page-start);
-  padding: 56px 48px;
+  min-width: 0;
 }
 
-.result-head {
-  margin-bottom: 30px;
-}
-
-h2 {
-  font-size: clamp(2.2rem, 4vw, 3.2rem);
-  font-weight: 300;
-  margin: 0 0 20px;
-}
-
-.result-head p {
-  color: var(--ms-color-text-secondary);
-  margin: 0;
-}
-
-h3 {
-  font-size: 1.2rem;
-  font-weight: 400;
-  margin: 0;
-}
-
-.content-row {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: 1fr 1fr;
-  margin-bottom: 16px;
-}
-
-.content-card {
-  background: var(--ms-color-surface-page-start);
-  min-height: 220px;
-  padding: 24px;
-}
-
-.content-card--mid {
-  background: var(--ms-color-surface-page-mid);
-}
-
-.content-card--signal .card-head h3 {
-  font-size: 1.34rem;
-  font-weight: 500;
-}
-
-.content-card--signal .detail-row p {
-  color: var(--ms-color-text-secondary);
-  font-size: 0.92rem;
-  line-height: 1.45;
-}
-
-.card-head {
-  align-items: center;
-  display: grid;
-  gap: 14px;
-  grid-template-columns: 56px minmax(0, 1fr);
-  margin-bottom: 12px;
-}
-
-.card-inset {
-  align-items: center;
-  background: var(--ms-color-surface-page-mid);
-  display: inline-flex;
-  height: 56px;
-  justify-content: center;
-  width: 56px;
-}
-
-.card-inset img {
-  height: 32px;
-  width: 32px;
-}
-
-.card-inset--warn {
-  background: var(--ms-color-danger-soft);
-}
-
-.card-inset--ok {
-  background: var(--ms-color-success-soft);
-}
-
-.card-inset--info {
-  background: var(--ms-color-surface-page-mid);
-}
-
-.detail-list {
-  display: grid;
-  gap: 6px;
-}
-
-.detail-row {
-  align-items: flex-start;
-  background: rgba(255, 255, 255, 0.7);
+.analysis-hero {
+  background: #ede9e3;
+  border-left: 4px solid #d0312d;
   display: grid;
   gap: 8px;
-  grid-template-columns: 12px minmax(0, 1fr);
-  min-height: 0;
-  padding: 10px 10px;
+  padding: 16px 18px;
+  transition: transform 0.28s ease;
 }
 
-.detail-row--highlight {
-  background: rgba(255, 239, 192, 0.8);
-  box-shadow: inset 0 0 0 1px rgba(188, 29, 12, 0.25);
-  animation: signalPulse 1.2s ease-in-out 2;
+.analysis-hero--transition {
+  transform: translateY(-2px);
 }
 
-.detail-row p {
-  line-height: 1.34;
+.analysis-hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status-pill,
+.tier-pill {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  padding: 4px 10px;
+  text-transform: uppercase;
+}
+
+.status-pill--alert {
+  background: #d0312d;
+  color: #ffffff;
+}
+
+.status-pill--safe {
+  background: #1f2d6b;
+  color: #ffffff;
+}
+
+.tier-pill {
+  background: #1f2d6b;
+  color: #ffffff;
+}
+
+.tier-pill--critical,
+.tier-pill--high {
+  background: #d0312d;
+}
+
+.tier-pill--medium {
+  background: #b45309;
+}
+
+.analysis-hero__title {
+  color: #1a1a2a;
+  font-size: clamp(30px, 3.8vw, 44px);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.04;
   margin: 0;
 }
 
-.detail-token {
-  background: var(--ms-color-brand);
-  display: inline-block;
-  height: 14px;
-  margin-top: 2px;
-  width: 14px;
+.analysis-hero__subtitle {
+  color: #6b7280;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0;
 }
 
-.detail-token--warn {
-  background: var(--ms-color-danger);
-  height: 9px;
-  margin-top: 5px;
-  width: 9px;
-}
-
-.detail-token--ok {
-  background: var(--ms-color-success);
-  height: 9px;
-  margin-top: 5px;
-  width: 9px;
-}
-
-.actions-block {
-  background: var(--ms-color-surface-page-mid);
-  margin: 0 0 16px;
-  padding: 24px;
-}
-
-.actions-block h3 {
-  margin-bottom: 14px;
-}
-
-.actions-grid {
+.reason-copy {
   display: grid;
   gap: 10px;
-  grid-template-columns: 1fr 1fr;
+  margin-top: 18px;
 }
 
-.action-card {
-  align-items: center;
-  background: var(--ms-color-surface-page-start);
-  color: var(--ms-color-text-primary);
+.reason-copy p {
+  color: #6b7280;
+  font-size: 14px;
+  line-height: 1.72;
+  margin: 0;
+}
+
+.section-label {
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.evidence-block {
+  margin-top: 18px;
+}
+
+.evidence-shell {
+  background: #f9fafb;
+  border-left: 3px solid #d1d5db;
+  border-radius: 10px;
+  margin: 0;
+  padding: 14px 14px 14px 16px;
+  position: relative;
+}
+
+.evidence-shell::before {
+  color: #9ca3af;
+  content: '"';
+  font-size: 28px;
+  left: 10px;
+  line-height: 1;
+  position: absolute;
+  top: 8px;
+}
+
+.evidence-quote {
+  color: #1a1a2a;
+  font-size: 15px;
+  line-height: 1.9;
+  margin: 0;
+  padding-left: 10px;
+}
+
+:deep(.flag-highlight) {
+  background: #fef08a;
+  border-radius: 3px;
+  color: #111111;
+  cursor: help;
+  padding: 1px 4px;
+}
+
+.warning-grid-section {
+  margin-top: 20px;
+}
+
+.warning-list {
+  display: grid;
+  gap: 0;
+}
+
+.warning-item {
+  animation: warningItemIn 280ms ease both;
+  animation-delay: var(--warning-delay);
+  border-bottom: 1px solid #e5e7eb;
+  padding: 14px 0;
+}
+
+.warning-item__head {
+  align-items: flex-start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 3px minmax(0, 1fr) auto;
+}
+
+.warning-item__bar {
+  background: var(--warning-color);
+  border-radius: 999px;
+  display: inline-flex;
+  min-height: 46px;
+}
+
+.warning-item__copy {
+  display: grid;
+  gap: 7px;
+}
+
+.warning-item__title {
+  color: #1a1a2a;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.warning-item__badge {
+  background: transparent;
+  color: var(--warning-color);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.3;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.warning-item__desc {
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.result-side {
+  min-width: 0;
+}
+
+.side-panel {
+  display: grid;
+  gap: 0;
+  min-height: 460px;
+  position: sticky;
+  top: 24px;
+}
+
+.side-section {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
+
+.side-block__title {
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.side-section--score {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 0 0 16px;
+  text-align: center;
+}
+
+.score-arc-wrap {
+  margin-top: 2px;
+}
+
+.score-arc {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  width: 100%;
+}
+
+.score-arc__track {
+  fill: none;
+  stroke: #d1d5db;
+  stroke-linecap: round;
+  stroke-width: 6;
+}
+
+.score-arc__progress {
+  fill: none;
+  stroke: var(--arc-color);
+  stroke-linecap: round;
+  stroke-width: 6;
+  transition:
+    stroke-dashoffset 1s ease,
+    stroke 0.2s ease;
+}
+
+.score-svg__text {
+  fill: var(--arc-color);
+}
+
+.score-svg__value {
+  font-size: 56px;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  paint-order: stroke;
+  stroke: transparent;
+}
+
+.score-svg__unit {
+  fill: #6b7280;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.side-score__band {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 600;
+  margin: -6px 0 0;
+}
+
+.side-risk {
+  border-radius: 999px;
+  color: #ffffff;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  justify-content: center;
+  letter-spacing: 0.09em;
+  margin: 10px auto 0;
+  min-height: 34px;
+  min-width: 170px;
+  padding: 8px 14px;
+  text-transform: uppercase;
+}
+
+.side-risk--critical {
+  background: #d0312d;
+}
+
+.side-risk--medium {
+  background: #b45309;
+}
+
+.side-risk--low {
+  background: #1f2d6b;
+}
+
+.side-section--type {
+  padding: 16px 0;
+}
+
+.scam-type-badge {
+  background: #f9fafb;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  color: #1a1a2a;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0;
+  padding: 6px 10px;
+}
+
+.scam-type-note {
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 8px 0 0;
+}
+
+.side-section--action {
+  background: #d0312d;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  padding: 16px 14px;
+}
+
+.action-card__title {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.action-card__text {
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.65;
+  margin: 0;
+}
+
+.next-links {
+  border-top: 1px solid #e3dfd8;
   display: flex;
-  font-weight: 500;
-  justify-content: space-between;
-  min-height: 58px;
-  padding: 16px;
-  text-decoration: none;
-  transition: background-color 0.2s ease;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 18px 0 0;
+  padding-top: 12px;
 }
 
-.action-card:hover,
-.action-card:focus-visible {
-  background: var(--ms-color-border-soft);
+.next-links__item {
+  color: #1f2d6b;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.next-links__item:hover,
+.next-links__item:focus-visible {
+  text-decoration: underline;
+}
+
+.next-links__item span {
+  color: #6b7280;
+  margin-left: 8px;
 }
 
 .extracted-preview {
-  background: var(--ms-color-surface-subtle);
-  margin: 0 0 16px;
-  padding: 14px 16px;
+  border-top: 1px solid #e5e2dc;
+  margin-top: 16px;
+  padding-top: 12px;
 }
 
 .extracted-preview summary {
-  color: var(--ms-color-text-primary);
+  color: #1a1a2a;
   cursor: pointer;
-  font-size: 0.84rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .extracted-preview p {
-  color: var(--ms-color-text-secondary);
-  font-size: 0.88rem;
-  line-height: 1.5;
+  color: #6b7280;
+  line-height: 1.6;
   margin: 10px 0 0;
   white-space: pre-wrap;
 }
 
-.action-arrow {
-  background: var(--ms-color-surface-page-mid);
-  display: inline-flex;
-  height: 26px;
-  position: relative;
-  width: 26px;
-}
-
-.action-arrow::after {
-  border-right: 2px solid var(--ms-color-brand-hover);
-  border-top: 2px solid var(--ms-color-brand-hover);
-  content: '';
-  height: 8px;
-  left: 7px;
-  position: absolute;
-  top: 8px;
-  transform: rotate(45deg);
-  width: 8px;
-}
-
-.plain-block {
-  background: rgba(255, 255, 255, 0.7);
-  line-height: 1.38;
-  margin: 0;
-  min-height: 88px;
-  padding: 12px;
-}
-
-@keyframes signalPulse {
-  0% {
-    box-shadow: inset 0 0 0 1px rgba(188, 29, 12, 0.25);
+@keyframes warningItemIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
   }
 
-  50% {
-    box-shadow: inset 0 0 0 2px rgba(188, 29, 12, 0.45);
-  }
-
-  100% {
-    box-shadow: inset 0 0 0 1px rgba(188, 29, 12, 0.25);
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
-@media (max-width: 980px) {
-  .result-split {
+@media (max-width: 1080px) {
+  .result-layout {
     grid-template-columns: 1fr;
   }
 
-  .score-sidebar,
-  .result-main {
-    padding: 40px 24px;
+  .side-panel {
+    min-height: auto;
+    position: static;
+  }
+}
+
+@media (max-width: 760px) {
+  .score-svg__value {
+    font-size: 50px;
   }
 
-  .content-row {
-    grid-template-columns: 1fr;
+  .warning-item__head {
+    grid-template-columns: 3px minmax(0, 1fr);
   }
 
-  .actions-grid {
-    grid-template-columns: 1fr;
+  .warning-item__badge {
+    grid-column: 2;
+    margin-top: -2px;
   }
 }
 </style>
