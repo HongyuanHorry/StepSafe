@@ -10,9 +10,35 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  abnQuery: {
+    type: String,
+    default: '',
+  },
+  abnResults: {
+    type: Array,
+    default: () => [],
+  },
+  abnLoading: {
+    type: Boolean,
+    default: false,
+  },
+  abnError: {
+    type: String,
+    default: '',
+  },
+  confirmedAbn: {
+    type: Object,
+    default: null,
+  },
 })
 
-const emit = defineEmits(['submit'])
+const emit = defineEmits([
+  'submit',
+  'update:abn-query',
+  'search-abn',
+  'clear-abn',
+  'confirm-abn',
+])
 
 const STORAGE_LAST_MODE_KEY = 'stepsafe:last-input-mode'
 const STORAGE_RECENT_CHECKS_KEY = 'stepsafe:recent-checks'
@@ -523,12 +549,13 @@ watch(
           <label class="mode-input-row" for="recruiterName">ABN lookup</label>
           <input
             id="recruiterName"
-            v-model="form.recruiterName"
+            :value="abnQuery"
             type="text"
             placeholder="Enter ABN (11 digits) or business name"
             maxlength="80"
             autocomplete="off"
-            @keydown.enter.prevent="searchAbn"
+            @input="emit('update:abn-query', $event.target.value)"
+            @keydown.enter.prevent="emit('search-abn')"
           />
           <p class="field-helper">Search ABN registry, confirm a match, then continue analysis.</p>
 
@@ -536,24 +563,26 @@ watch(
             <button
               type="button"
               class="abn-search-btn"
-              :disabled="abnLookupState.loading"
-              @click="searchAbn"
+              :disabled="abnLoading"
+              @click="emit('search-abn')"
             >
-              {{ abnLookupState.loading ? 'Searching ABN...' : 'Search ABN' }}
+              {{ abnLoading ? 'Searching ABN...' : 'Search ABN' }}
             </button>
             <button
-              v-if="abnLookupState.queried"
+              v-if="abnResults.length > 0 || abnError"
               type="button"
               class="abn-reset-btn"
-              @click="resetAbnLookup"
+              @click="emit('clear-abn')"
             >
               Clear
             </button>
           </div>
 
-          <div class="abn-preview" aria-label="ABN preview controls">
-            <p class="abn-preview__title">ABN preview</p>
-            <div class="abn-preview__chips">
+          <div>
+            <!--
+              <div class="abn-preview" aria-label="ABN preview controls">
+                <p class="abn-preview__title">ABN preview</p>
+              <div class="abn-preview__chips">
               <button
                 v-for="mode in abnPreviewModes"
                 :key="mode.tier"
@@ -564,27 +593,22 @@ watch(
               >
                 {{ mode.label }}
               </button>
-            </div>
+              </div>
+              </div>
+            -->
           </div>
 
-          <p v-if="abnLookupState.error" class="abn-note abn-note--error" role="alert">
-            {{ abnLookupState.error }}
-          </p>
-          <p v-else-if="abnLookupState.usageMessage" class="abn-note">
-            {{ abnLookupState.usageMessage }}
-          </p>
+          <div v-if="abnError" class="abn-error" role="alert">
+            {{ abnError }}
+          </div>
 
-          <div
-            v-if="abnLookupState.results.length"
-            class="abn-results"
-            aria-label="ABN search results"
-          >
+          <div v-if="abnResults.length" class="abn-results" aria-label="ABN search results">
             <p class="abn-results__title">ABN results</p>
             <article
-              v-for="(record, index) in abnLookupState.results"
-              :key="`${record.abn || 'record'}-${index}`"
+              v-for="record in abnResults"
+              :key="record.abn || `${record.name}-${record.matchScore}`"
               class="abn-result-card"
-              :class="{ 'abn-result-card--selected': abnLookupState.selectedAbn === record.abn }"
+              :class="{ 'abn-result-card--selected': confirmedAbn?.abn === record.abn }"
             >
               <p class="abn-result-card__name">{{ record.name || 'Unknown business' }}</p>
               <p class="abn-result-card__meta">
@@ -595,10 +619,17 @@ watch(
                   | Match {{ record.matchScore }}
                 </span>
               </p>
-              <button type="button" class="abn-confirm-btn" @click="confirmAbn(record)">
-                {{ abnLookupState.selectedAbn === record.abn ? 'Confirmed' : 'Confirm ABN' }}
+              <button type="button" class="abn-confirm-btn" @click="emit('confirm-abn', record)">
+                {{ confirmedAbn?.abn === record.abn ? 'Confirmed' : 'Confirm ABN' }}
               </button>
             </article>
+          </div>
+
+          <div v-if="confirmedAbn" class="abn-confirmed">
+            <strong>Confirmed ABN for this session</strong>
+            <div>{{ confirmedAbn.name }}</div>
+            <div>ABN: {{ confirmedAbn.abn }}</div>
+            <div>Status: {{ confirmedAbn.status }}</div>
           </div>
         </div>
       </aside>

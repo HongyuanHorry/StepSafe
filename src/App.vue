@@ -24,6 +24,11 @@ const statsLossValue = ref('$0B')
 const statsVictimValue = ref('0')
 const statsTaskValue = ref('0%')
 const latestAnalyzedInput = ref('')
+const abnQuery = ref('')
+const abnResults = ref([])
+const abnLoading = ref(false)
+const abnError = ref('')
+const confirmedAbn = ref(null)
 const NAV_SCROLL_GAP = 18
 const CHECK_SCAM_TARGET_ID = 'check-scam-panel'
 const EXTRACTED_PREVIEW_MAX_CHARS = 420
@@ -675,6 +680,52 @@ async function handleSubmission(payload) {
     isAnalyzing.value = false
   }, 850)
 }
+
+async function searchAbn() {
+  const query = abnQuery.value.trim()
+
+  if (!query) {
+    abnError.value = 'Please enter an ABN or business name.'
+    abnResults.value = []
+    confirmedAbn.value = null
+    return
+  }
+
+  abnLoading.value = true
+  abnError.value = ''
+  abnResults.value = []
+  confirmedAbn.value = null
+
+  try {
+    const response = await fetch(`/api/abn/lookup?query=${encodeURIComponent(query)}`)
+    const result = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+      throw new Error(result.detail || 'ABN lookup failed')
+    }
+
+    abnResults.value = Array.isArray(result.results) ? result.results : []
+
+    if (!abnResults.value.length) {
+      abnError.value = result.message || 'No ABN record found.'
+    }
+  } catch (error) {
+    abnError.value = error instanceof Error ? error.message : 'ABN lookup failed.'
+  } finally {
+    abnLoading.value = false
+  }
+}
+
+function clearAbn() {
+  abnQuery.value = ''
+  abnResults.value = []
+  abnError.value = ''
+  confirmedAbn.value = null
+}
+
+function confirmAbn(record) {
+  confirmedAbn.value = record
+}
 </script>
 
 <template>
@@ -893,7 +944,16 @@ async function handleSubmission(payload) {
           <SubmissionPanel
             :quick-mode="submissionQuickMode"
             :is-analyzing="isAnalyzing"
+            :abn-query="abnQuery"
+            :abn-results="abnResults"
+            :abn-loading="abnLoading"
+            :abn-error="abnError"
+            :confirmed-abn="confirmedAbn"
             @submit="handleSubmission"
+            @update:abn-query="abnQuery = $event"
+            @search-abn="searchAbn"
+            @clear-abn="clearAbn"
+            @confirm-abn="confirmAbn"
           />
         </div>
       </section>
