@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+import xml.etree.ElementTree as ET
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +20,8 @@ app = FastAPI(title="StepSafe PyMuPDF API", version="1.0.0")
 
 DEFAULT_OCR_LANGUAGE = os.getenv("PYMUPDF_OCR_LANGUAGE", "eng")
 DEFAULT_OCR_DPI = int(os.getenv("PYMUPDF_OCR_DPI", "150"))
+ABN_API_GUID = os.getenv("ABN_API_GUID", "").strip()
+ABR_BASE_URL = "https://abr.business.gov.au/ABRXMLSearch/AbrXmlSearch.asmx"
 
 # Vite dev server usually proxies /api to this service.
 app.add_middleware(
@@ -45,26 +50,151 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/api/debug-db")
-def debug_db():
-    try:
-        conn = get_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT current_database(), current_user;")
-                row = cur.fetchone()
-                return {
-                    "ok": True,
-                    "database": row[0],
-                    "user": row[1],
-                }
-        finally:
-            conn.close()
-    except Exception as exc:
+def _local_name(tag: str) -> str:
+    return tag.split("}", 1)[-1] if "}" in tag else tag
+
+
+def _first_text(node: ET.Element, names: set[str]) -> str:
+    lowered = {name.lower() for name in names}
+    for child in node.iter():
+        if _local_name(child.tag).lower() in lowered:
+            value = (child.text or "").strip()
+            if value:
+                return value
+    return ""
+
+
+def _parse_abn_payload(xml_bytes: bytes, query: str) -> dict[str, object]:
+    root = ET.fromstring(xml_bytes)
+
+    usage = _first_text(root, {"usageStatement", "exceptionDescription"})
+
+    if query.isdigit() and len(query) == 11:
+        abn = _first_text(root, {"identifierValue", "abn"}) or query
+        name = _first_text(root, {"entityName", "mainName", "organisationName", "name"})
+        status = _first_text(root, {"entityStatusCode", "status"})
+        state = _first_text(root, {"stateCode", "addressStateCode"})
+        postcode = _first_text(root, {"postcode", "addressPostcode"})
+
+        if not name and not status and not state and not postcode and not usage:
+            return {
+                "query": query,
+                "results": [],
+                "count": 0,
+                "message": "No ABN record found.",
+            }
+
         return {
-            "ok": False,
-            "error": str(exc),
+            "query": query,
+            "results": [
+                {
+                    "abn": abn,
+                    "name": name or "Unknown",
+                    "status": status or "Unknown",
+                    "state": state,
+                    "postcode": postcode,
+                    "matchScore": 100,
+                }
+            ],
+            "count": 1,
+            "message": usage,
         }
+
+    records: list[dict[str, object]] = []
+    for record in root.iter():
+        if _local_name(record.tag) != "searchResultsRecord":
+            continue
+
+        abn = _first_text(record, {"ABN", "identifierValue", "abn"})
+        name = _first_text(
+            record,
+            {"mainName", "organisationName", "businessName", "name"},
+        )
+        status = _first_text(record, {"entityStatusCode", "status"})
+        score = _first_text(record, {"score", "matchScore"})
+
+        records.append(
+            {
+                "abn": abn,
+                "name": name or "Unknown",
+                "status": status or "Unknown",
+                "state": "",
+                "postcode": "",
+                "matchScore": int(score) if score.isdigit() else None,
+            }
+        )
+
+    return {
+        "query": query,
+        "results": records,
+        "count": len(records),
+        "message": usage,
+    }
+
+
+def _fetch_abr_xml(url: str) -> bytes:
+    request = Request(url, headers={"User-Agent": "StepSafe/1.0"})
+    with urlopen(request, timeout=15) as response:
+        return response.read()
+
+
+@app.get("/api/abn/lookup")
+def lookup_abn(query: str) -> dict[str, object]:
+    query = query.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Query is required.")
+
+    if not ABN_API_GUID:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "ABN lookup is not configured. Set ABN_API_GUID in backend environment "
+                "before using /api/abn/lookup."
+            ),
+        )
+
+    try:
+        if query.isdigit() and len(query) == 11:
+            params = urlencode(
+                {
+                    "searchString": query,
+                    "includeHistoricalDetails": "Y",
+                    "authenticationGuid": ABN_API_GUID,
+                }
+            )
+            url = f"{ABR_BASE_URL}/ABRSearchByABN?{params}"
+        else:
+            params = urlencode(
+                {
+                    "name": query,
+                    "postcode": "",
+                    "legalName": "Y",
+                    "tradingName": "Y",
+                    "businessName": "Y",
+                    "activeABNsOnly": "Y",
+                    "NSW": "Y",
+                    "SA": "Y",
+                    "ACT": "Y",
+                    "VIC": "Y",
+                    "WA": "Y",
+                    "NT": "Y",
+                    "QLD": "Y",
+                    "TAS": "Y",
+                    "authenticationGuid": ABN_API_GUID,
+                    "searchWidth": "typical",
+                    "minimumScore": "0",
+                    "maxSearchResults": "10",
+                }
+            )
+            url = f"{ABR_BASE_URL}/ABRSearchByNameAdvancedSimpleProtocol2017?{params}"
+
+        xml_payload = _fetch_abr_xml(url)
+        return _parse_abn_payload(xml_payload, query)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"ABN lookup failed: {exc}") from exc
+
 
 @app.post("/api/pymupdf/parse")
 async def parse_pdf(
