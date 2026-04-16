@@ -476,7 +476,6 @@ const nextActions = [
                   <h3 class="warning-item__title">{{ item.label }}</h3>
                   <p class="warning-item__desc">{{ item.advice }}</p>
                 </div>
-                <span class="warning-item__badge">{{ item.badge }}</span>
               </div>
             </article>
           </div>

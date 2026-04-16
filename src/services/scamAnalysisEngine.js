@@ -242,7 +242,7 @@ function normalizeBackendResult(result) {
     classificationConfidence:
       result?.classificationConfidence ?? result?.confidence ?? 0,
     classificationConfidenceThreshold:
-      result?.classificationConfidenceThreshold ?? 0.5,
+      result?.classificationConfidenceThreshold ?? 0.33,
     explanation,
     factors: normalizedFactors,
   }

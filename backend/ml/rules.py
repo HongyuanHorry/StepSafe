@@ -13,8 +13,8 @@ TYPE_MAPPING = {
     "Task-Based Scam": "task-based scam",
     "Fake Job": "job scam",
     "Advance Fee": "payment scam",
-    "Phishing": "unknown or unclear",
-    "Legitimate": "unknown or unclear",
+    "Phishing": "unclear or unknown",
+    "Legitimate": "legitimate",
 }
 
 
@@ -58,7 +58,7 @@ RULES = [
         "label": "Requests sensitive personal information",
         "severity": "high",
         "weight": 30,
-        "typeVotes": {"unknown or unclear": 2, "job scam": 1},
+        "typeVotes": {"unclear or unknown": 1, "job scam": 1},
         "keywords": [
             "bank details", "paypal details", "account number",
             "passport", "id", "salary setup"
@@ -159,14 +159,21 @@ def classify_stepsafe_type(matched_rules: List[Dict], ml_type: str) -> str:
         "task-based scam": 0,
         "job scam": 0,
         "payment scam": 0,
+        "legitimate": 0,
         "unknown or unclear": 0,
     }
 
     for rule in matched_rules:
         for scam_type, votes in rule["typeVotes"].items():
-            vote_totals[scam_type] += votes
+            normalized_type = scam_type.strip().lower()
+            if normalized_type not in vote_totals:
+                normalized_type = "unknown or unclear"
+            vote_totals[normalized_type] += votes
 
     ml_bucket = map_model_type_to_stepsafe(ml_type)
+    if ml_bucket not in vote_totals:
+        ml_bucket = "unknown or unclear"
+
     if ml_bucket != "unknown or unclear":
         vote_totals[ml_bucket] += 2
 
@@ -177,7 +184,7 @@ def classify_stepsafe_type(matched_rules: List[Dict], ml_type: str) -> str:
     top_type = max(vote_totals, key=vote_totals.get)
     confidence = vote_totals[top_type] / total_votes
 
-    if confidence < 0.5:
+    if confidence < 0.33:
         return "unknown or unclear"
 
     return top_type
