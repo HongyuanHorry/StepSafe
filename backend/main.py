@@ -9,9 +9,12 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pymupdf
-
+from backend.db.postgres import get_conn
 from backend.ml.inference import predict_message
 from backend.ml.rules import build_analysis_response
+from backend.services.link_analysis import analyze_link_input
+from backend.services.pdf_analysis import parse_pdf_bytes
+from backend.services.analyze_core import analyze_payload
 
 app = FastAPI(title="StepSafe PyMuPDF API", version="1.0.0")
 
@@ -201,60 +204,19 @@ async def parse_pdf(
     ocr_dpi: int = DEFAULT_OCR_DPI,
 ) -> dict[str, object]:
     filename = file.filename or "uploaded.pdf"
-    if not filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
-
     data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
     try:
-        with pymupdf.open(stream=data, filetype="pdf") as doc:
-            total_pages = doc.page_count
-            page_texts = []
-            ocr_pages = 0
-            ocr_attempted = 0
-            warnings: list[str] = []
-
-            for page in doc:
-                # sort=True helps produce a more natural reading order.
-                text = page.get_text("text", sort=True).strip()
-
-                if not text and enable_ocr:
-                    ocr_attempted += 1
-                    try:
-                        # OCR fallback for scanned / image-only pages.
-                        ocr_textpage = page.get_textpage_ocr(
-                            language=ocr_language,
-                            dpi=ocr_dpi,
-                            full=True,
-                        )
-                        text = page.get_text("text", textpage=ocr_textpage, sort=True).strip()
-                        if text:
-                            ocr_pages += 1
-                    except Exception as ocr_exc:
-                        warnings.append(
-                            f"OCR unavailable on page {page.number + 1}: {ocr_exc}"
-                        )
-
-                if text:
-                    page_texts.append(text)
-
-            merged_text = "\n\n".join(page_texts).strip()
-
-        return {
-            "text": merged_text,
-            "pageCount": total_pages,
-            "extractedPages": len(page_texts),
-            "hasText": bool(merged_text),
-            "ocrEnabled": enable_ocr,
-            "ocrLanguage": ocr_language,
-            "ocrDpi": ocr_dpi,
-            "ocrAttemptedPages": ocr_attempted,
-            "ocrSucceededPages": ocr_pages,
-            "warnings": warnings,
-        }
-    except Exception as exc:  # pragma: no cover - defensive API guard
+        return parse_pdf_bytes(
+            data=data,
+            filename=filename,
+            enable_ocr=enable_ocr,
+            ocr_language=ocr_language,
+            ocr_dpi=ocr_dpi,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Failed to parse PDF: {exc}") from exc
 
 
@@ -266,9 +228,65 @@ def analyze(req: AnalyzeRequest) -> dict[str, object]:
         row, scam_pred, scam_prob, type_pred = predict_message(payload)
         result = build_analysis_response(row, scam_pred, scam_prob, type_pred)
 
+        if req.inputType == "link":
+            link_result = analyze_link_input(req.text)
+
+            result["domain"] = link_result["domain"]
+            result["domainInfo"] = link_result["domainInfo"]
+            result["linkPrediction"] = link_result["linkPrediction"]
+            result["linkProbability"] = link_result["linkProbability"]
+
+            result["indicators"] = result.get("indicators", []) + link_result["linkIndicators"]
+            result["factors"] = result.get("factors", []) + link_result["linkIndicators"]
+
+            extra_explanation = " ".join(link_result["linkExplanation"]).strip()
+            if extra_explanation:
+                result["explanation"] = f"{result['explanation']} {extra_explanation}".strip()
+
         return result
 
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Analyze failed: {exc}") from exc
+
+@app.post("/api/analyze-pdf")
+async def analyze_pdf(
+    file: UploadFile = File(...),
+    enable_ocr: bool = True,
+    ocr_language: str = DEFAULT_OCR_LANGUAGE,
+    ocr_dpi: int = DEFAULT_OCR_DPI,
+) -> dict[str, object]:
+    filename = file.filename or "uploaded.pdf"
+    data = await file.read()
+
+    try:
+        parsed = parse_pdf_bytes(
+            data=data,
+            filename=filename,
+            enable_ocr=enable_ocr,
+            ocr_language=ocr_language,
+            ocr_dpi=ocr_dpi,
+        )
+
+        payload = {
+            "inputType": "pdf",
+            "text": parsed["text"],
+            "message_type": "Email",
+            "platform": "Gmail",
+            "job_type": "Remote",
+        }
+
+        analysis = analyze_payload(payload)
+
+        return {
+            "inputType": "pdf",
+            "filename": filename,
+            "parse": parsed,
+            "analysis": analysis,
+        }
+
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Analyze PDF failed: {exc}") from exc
